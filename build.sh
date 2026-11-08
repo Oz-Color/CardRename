@@ -10,7 +10,7 @@ cd "$(dirname "$0")"
 
 if [ "${1:-}" = "test" ]; then
   mkdir -p build
-  swiftc -swift-version 5 Sources/CardScan.swift Sources/Labroll.swift Sources/NameScheme.swift Sources/XXHash64.swift Tests/main.swift -o build/tests
+  swiftc -swift-version 5 Sources/CardScan.swift Sources/Labroll.swift Sources/NameScheme.swift Sources/XXHash64.swift Sources/Updater.swift Tests/main.swift -o build/tests
   ./build/tests
   exit
 fi
@@ -37,8 +37,17 @@ swiftc -O -swift-version 5 -parse-as-library -target arm64-apple-macos14 \
   Sources/*.swift -o "$APP/Contents/MacOS/CardRename"
 cp Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-codesign --force --sign - "$APP"
-echo "Built $APP"
+# Signing identity: SIGN_ID if set, else a Developer ID Application certificate (needed for other
+# Macs, with notarization), else an Apple Development one (stable identity: macOS keeps the app's
+# permissions across builds), else ad hoc.
+SIGN_ID="${SIGN_ID:-$(security find-identity -v -p codesigning | grep -m1 -o '"Developer ID Application: [^"]*"' | tr -d '"' || true)}"
+SIGN_ID="${SIGN_ID:-$(security find-identity -v -p codesigning | grep -m1 -o '"Apple Development: [^"]*"' | tr -d '"' || true)}"
+case "$SIGN_ID" in
+  "Developer ID Application:"*) codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$APP" ;;
+  "")                           codesign --force --sign - "$APP" ;;
+  *)                            codesign --force --options runtime --sign "$SIGN_ID" "$APP" ;;
+esac
+echo "Built $APP, signed: ${SIGN_ID:-ad hoc}"
 
 if [ "${1:-}" = "install" ]; then
   /usr/bin/osascript -e 'tell application id "local.cardrename" to quit' 2>/dev/null || true
@@ -56,5 +65,20 @@ if [ "${1:-}" = "dmg" ]; then
   ln -s /Applications build/dmg/Applications
   hdiutil create -quiet -volname "Card Rename" -srcfolder build/dmg -fs HFS+ -format UDZO build/CardRename.dmg
   /bin/rm -rf build/dmg
+  # Notarized when signed with Developer ID and the notarytool login is saved under NOTARY_PROFILE
+  # (once: xcrun notarytool store-credentials oz-color-notary --apple-id ... --team-id ...).
+  NOTARY_PROFILE="${NOTARY_PROFILE:-oz-color-notary}"
+  case "$SIGN_ID" in
+    "Developer ID Application:"*)
+      if xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+        codesign --force --timestamp --sign "$SIGN_ID" build/CardRename.dmg
+        xcrun notarytool submit build/CardRename.dmg --keychain-profile "$NOTARY_PROFILE" --wait
+        xcrun stapler staple build/CardRename.dmg
+        spctl -a -t open --context context:primary-signature -v build/CardRename.dmg
+      else
+        echo "Not notarized: no notarytool login saved as \"$NOTARY_PROFILE\"."
+      fi ;;
+    *) echo "Not notarized: needs a Developer ID Application certificate." ;;
+  esac
   echo "Built build/CardRename.dmg (v$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Info.plist))"
 fi

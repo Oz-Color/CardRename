@@ -213,6 +213,18 @@ let renamed = try? Labroll.renameInPlace(copySource, to: "A001C001_20261102_GOPR
 expectTrue("rename in place", renamed?.lastPathComponent == "A001C001_20261102_GOPRO.MP4" && !fm.fileExists(atPath: copySource.path))
 expectTrue("rename never overwrites", (try? Labroll.renameInPlace(renamed!, to: "out")) == nil)
 
+// Update check: version order and the GitHub "latest release" answer.
+expectTrue("1.10 is newer than 1.9", Updater.isNewer("1.10", than: "1.9"))
+expectTrue("1.7.1 is newer than 1.7", Updater.isNewer("1.7.1", than: "1.7"))
+expectTrue("1.7 is not newer than 1.7.0", !Updater.isNewer("1.7", than: "1.7.0"))
+expectTrue("1.6 is not newer than 1.7", !Updater.isNewer("1.6", than: "1.7"))
+let releaseJSON = #"{"tag_name":"v1.8","html_url":"https://github.com/x/y/releases/tag/v1.8","assets":[{"name":"notes.txt","browser_download_url":"https://e/notes.txt"},{"name":"CardRename.dmg","browser_download_url":"https://e/CardRename.dmg"}]}"#
+expectEqual("release: version without v, DMG link", Updater.parse(Data(releaseJSON.utf8)),
+            Updater.Release(version: "1.8", download: URL(string: "https://e/CardRename.dmg")!))
+expectEqual("release without DMG: its page", Updater.parse(Data(#"{"tag_name":"1.9","html_url":"https://p"}"#.utf8))?.download,
+            URL(string: "https://p"))
+expectTrue("not a release: nil", Updater.parse(Data(#"{"message":"Not Found"}"#.utf8)) == nil)
+
 try? fm.removeItem(at: base)
 print(failures == 0 ? "\nAll tests passed" : "\n\(failures) failed")
 exit(failures == 0 ? 0 : 1)

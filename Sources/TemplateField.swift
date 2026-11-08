@@ -191,11 +191,15 @@ struct SchemeEditor: View {
     let values: NameScheme.Values
     /// Narrow layout (menu bar panel): date source on its own line.
     var compact = false
+    /// What this scheme is for, added to the how-to in the (i) icon.
+    var info = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
+            HStack(spacing: 4) {
                 Text(title).bold()
+                InfoButton(info + (info.isEmpty ? "" : "\n\n")
+                    + "Drag a token into the name or click it to add it at the end. Drag tokens to move them; the arrow on Clip, date and Random tokens changes their format.")
                 Spacer()
                 if !compact { dateSource }
                 Button("Reset") { scheme = standard }
@@ -213,9 +217,6 @@ struct SchemeEditor: View {
             }
             .controlSize(.small)
             if compact { dateSource }
-            Text("Drag a token into the name or click it to add it at the end. Drag tokens to move them; the arrow on Clip, date and Random tokens changes their format.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
             Text(example)
                 .font(.system(.caption, design: .monospaced))
                 .textSelection(.enabled)

@@ -325,28 +325,25 @@ struct LabrollView: View {
             DisclosureGroup("Clip naming scheme", isExpanded: $store.namingOpen) {
                 VStack(alignment: .leading, spacing: 6) {
                     SchemeEditor(title: "Clip names", scheme: $store.clipScheme, standard: .clipDefault,
-                                 forClips: true, values: store.exampleValues)
-                    Text("Random characters are drawn once per clip. Card names follow their own scheme, in the Card Rename panel under Settings.")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                                 forClips: true, values: store.exampleValues,
+                                 info: "Random characters are drawn once per clip. Card names follow their own scheme, in the Card Rename panel under Settings.")
                 }
                 .padding(.top, 6)
             }
             .disabled(store.running)
 
-            Picker("Mode", selection: $store.renameOnly) {
-                Text("Copy + rename").tag(false)
-                Text("Rename only, on the card").tag(true)
+            HStack(spacing: 4) {
+                Picker("Mode", selection: $store.renameOnly) {
+                    Text("Copy + rename").tag(false)
+                    Text("Rename only, on the card").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .disabled(store.running)
+                InfoButton("Copy + rename: clips are copied to the destination folder under their new names, each copy checked with xxHash64; the card is left as it is.\n\nRename only: clips are renamed on the card itself, so camera indexes (Sony XML, GoPro LRF/THM) no longer match. Old and new names are kept in ~/Library/Logs/CardRename-clips.log.")
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .disabled(store.running)
 
-            if store.renameOnly {
-                Text("Clips are renamed on the card itself, so camera indexes (Sony XML, GoPro LRF/THM) no longer match. Old and new names are kept in ~/Library/Logs/CardRename-clips.log.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
+            if !store.renameOnly {
                 HStack {
                     TextField("Destination folder", text: $store.destination)
                     Button("Choose…") { store.chooseDestination() }

@@ -93,6 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         LabrollStore.shared.openWindow = { [weak self] in self?.showLabrollWindow() }
+        Updater.shared.start()
 
         if !UserDefaults.standard.bool(forKey: "launchedBefore") {
             UserDefaults.standard.set(true, forKey: "launchedBefore")
@@ -112,10 +113,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            Updater.shared.checkIfStale()
         }
     }
 
     @MainActor func showWindow() {
+        Updater.shared.checkIfStale()
         if window == nil {
             let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable],
                                   backing: .buffered, defer: false)
@@ -178,6 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct PanelView: View {
     // No @State here: it is a macro in the current SDK and the Command Line Tools ship without its plugin.
     @ObservedObject var engine: Engine
+    @ObservedObject var updater = Updater.shared
     var inWindow = false
 
     static let version: String = {
@@ -191,14 +195,19 @@ struct PanelView: View {
             HStack {
                 Text("Card Rename").font(.headline)
                 Text(Self.version).font(.caption).foregroundStyle(.secondary)
+                if inWindow {
+                    InfoButton("Card Rename runs in the menu bar (SD card icon). If the icon is hidden, open the app again from Applications to show this window.")
+                }
                 Spacer()
                 if engine.busy { ProgressView().controlSize(.small) }
             }
 
-            if inWindow {
-                Text("Card Rename runs in the menu bar (SD card icon). If the icon is hidden, open the app again from Applications to show this window.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            if let update = updater.available {
+                HStack {
+                    Label("Update available: \(update.version)", systemImage: "arrow.down.circle")
+                    Spacer()
+                    Button("Download") { updater.download() }
+                }
             }
 
             Toggle("Rename cards automatically", isOn: $engine.enabled)
@@ -238,34 +247,31 @@ struct PanelView: View {
 
             DisclosureGroup("Settings", isExpanded: $engine.settingsOpen) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Default card names, comma separated").font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Text("Default card names").font(.caption).foregroundStyle(.secondary)
+                        InfoButton("Only cards still named one of these are renamed, comma separated. A number after the name counts too: UNTITLED 2, DJI1.")
+                    }
                     TextField("UNTITLED, NO NAME, DJI", text: $engine.defaultNames)
-                    Text("Cards without reel ID").font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Text("Cards without reel ID").font(.caption).foregroundStyle(.secondary)
+                        InfoButton("Both use the card naming scheme and the Labroll window's next labroll and Cam ID; the card's clips are listed there once it is ready.")
+                    }
                     Picker("Cards without reel ID", selection: $engine.askWhenNoReel) {
                         Text("Name automatically").tag(false)
                         Text("Ask, name suggested").tag(true)
                     }
                     .pickerStyle(.radioGroup)
                     .labelsHidden()
-                    Text("Both use the card naming scheme and the Labroll window's next labroll and Cam ID; the card's clips are listed there once it is ready.")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                     CardSchemeSettings(store: .shared)
-                    Toggle("Eject the card after renaming", isOn: $engine.ejectAfterRename)
-                    Text("""
-                        After a rename, eject the card and insert it again before offloading. \
-                        Until then Finder and offload apps can often not see a new card mounted \
-                        with a duplicate "Untitled" name.
-                        """)
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 4) {
+                        Toggle("Eject the card after renaming", isOn: $engine.ejectAfterRename)
+                        InfoButton("After a rename, eject the card and insert it again before offloading. Until then, Finder and offload apps may keep the old name, and a second card mounted with the same \"Untitled\" name may not show up.")
+                    }
                     Toggle("Open at login", isOn: Binding(get: { engine.openAtLogin },
                                                           set: { engine.setOpenAtLogin($0) }))
-                    Toggle("Show icon in menu bar", isOn: $engine.showMenuBarIcon)
-                    if !engine.showMenuBarIcon {
-                        Text("Cards are still renamed. Open the app again from Applications to show this window.")
-                            .font(.caption).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 4) {
+                        Toggle("Show icon in menu bar", isOn: $engine.showMenuBarIcon)
+                        InfoButton("When hidden, cards are still renamed. Open the app again from Applications to show this window.")
                     }
                 }
                 .padding(.top, 6)
@@ -292,10 +298,8 @@ struct CardSchemeSettings: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             SchemeEditor(title: "Card names", scheme: $store.cardScheme, standard: .cardDefault,
-                         forClips: false, values: store.exampleValues, compact: true)
-            Text("Every card follows it. With a reel ID, Labroll is the reel (D902_261103); {labroll} alone keeps D902. Labels keep A-Z 0-9 _ -. When too long, YYYY becomes YY, then the date and the camera are left out; random characters stay.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                         forClips: false, values: store.exampleValues, compact: true,
+                         info: "Every card follows it. With a reel ID, Labroll is the reel (D902_261103); {labroll} alone keeps D902. Labels keep A-Z 0-9 _ -. When too long, YYYY becomes YY, then the date and the camera are left out; random characters stay.")
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))

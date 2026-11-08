@@ -4,7 +4,9 @@
 
 The Labroll features are based on **[Labroll Utility](https://github.com/brixybrice/Labroll-Utility) by Brix** ([@brixybrice](https://github.com/brixybrice)).
 
-Open the DMG and drag Card Rename to Applications. Apple Silicon, macOS 14 or later. The app is not notarized: the first time, macOS refuses to open it; go to System Settings > Privacy & Security and click **Open Anyway**, then allow notifications and access to removable volumes.
+Open the DMG and drag Card Rename to Applications. Apple Silicon, macOS 14 or later. Signed by Oz Color Shop and notarized by Apple (from version 1.7), so it opens like any downloaded app. At first launch, allow notifications and access to removable volumes.
+
+From 1.7 on, the app checks this page's latest release once a day (and when its panel opens, at most hourly). A newer version shows **Update available** in the panel, with a Download button, and one notification.
 
 Menu bar app that renames camera cards after the reel ID found in their clip names, as soon as they are mounted. Every card name follows the card naming scheme (see Naming scheme); the examples use the default, `{labroll}_{date:YYYYMMDD}_{cam}`, on an exFAT card.
 
@@ -26,7 +28,7 @@ Only cards still carrying a default name (UNTITLED, NO NAME, NONAME, DJI, editab
 - **Settings**: default card names; cards without reel ID named automatically or asked with the name suggested; the card naming scheme (below); eject the card after renaming, open at login, show icon in menu bar.
 - **Open log**: `~/Library/Logs/CardRename.log` (same format as `rename_card.sh`).
 
-The same panel opens in a window on first launch, and whenever the app is opened again from Applications. Useful when the menu bar icon is hidden: behind the notch on a full menu bar, switched off in System Settings > Menu Bar, or tucked away by Bartender or Ice. While this window or the Labroll window is open, Card Rename also shows in the Dock and the app switcher. The panel shows the version (e.g. `v1.6 (7)`).
+The same panel opens in a window on first launch, and whenever the app is opened again from Applications. Useful when the menu bar icon is hidden: behind the notch on a full menu bar, switched off in System Settings > Menu Bar, or tucked away by Bartender or Ice. While this window or the Labroll window is open, Card Rename also shows in the Dock and the app switcher. The panel shows the version (e.g. `v1.7 (8)`).
 
 Each rename posts a notification with an **Undo** button (hover the banner, or set Card Rename to "Alerts" in System Settings > Notifications to keep the button visible). After an undo, the automation leaves that card alone until it is reformatted.
 
@@ -81,7 +83,7 @@ Command Line Tools are enough, no Xcode.
 ./build.sh install    # copy to /Applications and open
 ```
 
-The app is signed ad hoc, for this Mac only. First launch: macOS asks to allow notifications and access to removable volumes; both are needed.
+The build is signed with the first certificate found in the keychain: Developer ID Application (the only one other Macs accept, once notarized), else Apple Development (macOS then keeps the app's permissions from one build to the next), else ad hoc. `SIGN_ID="..." ./build.sh` picks one. First launch: macOS asks to allow notifications and access to removable volumes; both are needed.
 
 ## Shell script
 
