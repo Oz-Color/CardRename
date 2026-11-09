@@ -1,6 +1,7 @@
 import Combine
 import SwiftUI
 
+#if !SNAPSHOTS   // ./build.sh screens has its own entry point
 @main
 struct CardRenameApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -15,6 +16,7 @@ struct CardRenameApp: App {
             }
     }
 }
+#endif
 
 /// Classic NSStatusItem rather than SwiftUI's MenuBarExtra: it gets its own autosave name
 /// ("CardRename" instead of the generic "Item-0"), so menu bar managers such as Ice can list it.
@@ -195,14 +197,22 @@ struct PanelView: View {
             ForEach(engine.recent.prefix(8)) { entry in
                 HStack {
                     Text(entry.timeLabel).monospacedDigit().foregroundStyle(.secondary)
-                    Text("\(entry.old) → \(entry.new)")
+                    // New name on its own line: long scheme names (A001_20261109_GOPRO) no longer wrap.
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(entry.new).lineLimit(1).truncationMode(.middle)
+                        Text("was \(entry.old)").font(.caption).foregroundStyle(.secondary)
+                    }
+                    .help("\(entry.old) → \(entry.new)")
                     Spacer()
                     if entry.undone {
                         Text("undone").foregroundStyle(.secondary)
                     } else if engine.isMounted(entry) {
-                        Button("Clips") { engine.sendToLabroll(entry) }
-                            .help("List this card's clips in the Labroll window")
-                        Button("Undo") { Task { await engine.undo(entry) } }
+                        Group {
+                            Button("Clips") { engine.sendToLabroll(entry) }
+                                .help("List this card's clips in the Labroll window")
+                            Button("Undo") { Task { await engine.undo(entry) } }
+                        }
+                        .controlSize(.small)
                     } else {
                         Text("not mounted").foregroundStyle(.tertiary)
                     }

@@ -5,6 +5,7 @@
 #   ./build.sh install   build, copy to /Applications and open it
 #   ./build.sh icon      redraw Resources/AppIcon.icns from Tools/make_icon.swift
 #   ./build.sh dmg       build, then build/CardRename.dmg (app + Applications shortcut) for a GitHub release
+#   ./build.sh screens   build, then the README screenshots in docs/screenshots
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -81,4 +82,16 @@ if [ "${1:-}" = "dmg" ]; then
     *) echo "Not notarized: needs a Developer ID Application certificate." ;;
   esac
   echo "Built build/CardRename.dmg (v$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Info.plist))"
+fi
+
+if [ "${1:-}" = "screens" ]; then
+  # The app's views with demo data (Tools/screenshots.swift), in a copy of the bundle for its resources.
+  SHOT="build/Screenshots.app"
+  /bin/rm -rf "build/Screenshots.app"
+  /usr/bin/ditto "$APP" "$SHOT"
+  swiftc -O -swift-version 5 -parse-as-library -D SNAPSHOTS -target arm64-apple-macos14 \
+    Sources/*.swift Tools/screenshots.swift -o "$SHOT/Contents/MacOS/CardRename"
+  codesign --force --sign - "$SHOT"
+  mkdir -p docs/screenshots
+  "$SHOT/Contents/MacOS/CardRename" docs/screenshots
 fi

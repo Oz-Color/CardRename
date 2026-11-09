@@ -48,6 +48,14 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
 
     private var defaultNameList: [String] { defaultNames.split(separator: ",").map(String.init) }
 
+    #if SNAPSHOTS
+    /// Demo history for ./build.sh screens, shown as if the cards were still mounted.
+    func showDemo(_ entries: [RenameEntry]) {
+        recent = entries
+        mountedNames = Set(entries.map(\.new))
+    }
+    #endif
+
     override init() {
         enabled = store.object(forKey: "enabled") as? Bool ?? true
         defaultNames = store.string(forKey: "defaultNames") ?? "UNTITLED, NO NAME, NONAME, DJI"
