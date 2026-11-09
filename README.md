@@ -9,15 +9,11 @@ Open the DMG and drag Card Rename to Applications. Apple Silicon, macOS 14 or la
 From 1.7 on, the app checks this page's latest release once a day (and when its panel opens, at most hourly). A newer version shows **Update available** in the panel, with a Download button, and one notification.
 
 <p>
-  <img src="docs/screenshots/panel.png" width="340" alt="Menu bar panel: recent renames with Clips and Undo">
-  <img src="docs/screenshots/panel-dark.png" width="340" alt="The same panel in dark mode">
+  <img src="docs/screenshots/settings.png" width="340" alt="Settings: default card names, card naming scheme, eject after renaming">
 </p>
+
 <p>
   <img src="docs/screenshots/labroll.png" width="680" alt="Labroll window: clips of a GoPro card, before and after their new names">
-</p>
-<p>
-  <img src="docs/screenshots/settings.png" width="340" alt="Settings: default card names, card naming scheme, eject after renaming">
-  <img src="docs/screenshots/about.png" width="320" alt="About window with the Oz Color logo">
 </p>
 
 Screenshots are drawn from the app's own views with demo data: `./build.sh screens`.
