@@ -1,6 +1,6 @@
 # Card Rename
 
-**[Download Card Rename (DMG)](https://github.com/Briantoma/CardRename/releases/latest/download/CardRename.dmg)** · [all releases](https://github.com/Briantoma/CardRename/releases)
+**[Download Card Rename (DMG)](https://github.com/Oz-Color/CardRename/releases/latest/download/CardRename.dmg)** · [all releases](https://github.com/Oz-Color/CardRename/releases)
 
 The Labroll features are based on **[Labroll Utility](https://github.com/brixybrice/Labroll-Utility) by Brix** ([@brixybrice](https://github.com/brixybrice)).
 
@@ -28,7 +28,7 @@ Only cards still carrying a default name (UNTITLED, NO NAME, NONAME, DJI, editab
 - **Settings**: default card names; cards without reel ID named automatically or asked with the name suggested; the card naming scheme (below); eject the card after renaming, open at login, show icon in menu bar.
 - **Open log**: `~/Library/Logs/CardRename.log` (same format as `rename_card.sh`).
 
-The same panel opens in a window on first launch, and whenever the app is opened again from Applications. Useful when the menu bar icon is hidden: behind the notch on a full menu bar, switched off in System Settings > Menu Bar, or tucked away by Bartender or Ice. While this window or the Labroll window is open, Card Rename also shows in the Dock and the app switcher. The panel shows the version (e.g. `v1.7 (8)`).
+The same panel opens in a window on first launch, and whenever the app is opened again from Applications. Useful when the menu bar icon is hidden: behind the notch on a full menu bar, switched off in System Settings > Menu Bar, or tucked away by Bartender or Ice. While this window or the Labroll window is open, Card Rename also shows in the Dock and the app switcher. The panel shows the version (e.g. `v1.8`).
 
 Each rename posts a notification with an **Undo** button (hover the banner, or set Card Rename to "Alerts" in System Settings > Notifications to keep the button visible). After an undo, the automation leaves that card alone until it is reformatted.
 
@@ -97,8 +97,12 @@ bash scripts/rename_card.sh undo                          # give the last rename
 
 ## Credits
 
-Card Rename by Thomas: [github.com/Briantoma/CardRename](https://github.com/Briantoma/CardRename).
+Card Rename by [Oz Color](https://shop.oz-color.fr/).
 
 The Labroll features are based on [Labroll Utility](https://github.com/brixybrice/Labroll-Utility) by Brix.
 
 Both appear in the app under **About** (panel footer, or Card Rename > About Card Rename while a window is open).
+
+## License
+
+[MIT](LICENSE), © 2026 Oz Color. The Labroll features keep Labroll Utility's MIT notice, © 2026 Brix.

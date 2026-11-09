@@ -36,7 +36,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 swiftc -O -swift-version 5 -parse-as-library -target arm64-apple-macos14 \
   Sources/*.swift -o "$APP/Contents/MacOS/CardRename"
 cp Info.plist "$APP/Contents/Info.plist"
-cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp Resources/AppIcon.icns Resources/OzColor-*.png LICENSE "$APP/Contents/Resources/"
 # Signing identity: SIGN_ID if set, else a Developer ID Application certificate (needed for other
 # Macs, with notarization), else an Apple Development one (stable identity: macOS keeps the app's
 # permissions across builds), else ad hoc.
