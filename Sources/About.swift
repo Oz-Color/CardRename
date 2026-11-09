@@ -21,6 +21,8 @@ enum About {
         }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        // Otherwise the first link gets the focus ring on opening; Tab still reaches the links.
+        window?.makeFirstResponder(nil)
     }
 }
 
