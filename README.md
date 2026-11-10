@@ -6,7 +6,7 @@ The Labroll features are based on **[Labroll Utility](https://github.com/brixybr
 
 Open the DMG and drag Card Rename to Applications. Apple Silicon, macOS 14 or later. Signed by Oz Color Shop and notarized by Apple (from version 1.7), so it opens like any downloaded app. At first launch, allow notifications and access to removable volumes.
 
-From 1.7 on, the app checks this page's latest release once a day (and when its panel opens, at most hourly). A newer version shows **Update available** in the panel, with a Download button, and one notification.
+From 1.7 on, the app checks this page's latest release once a day (and when its panel opens, at most hourly). A newer version shows **Update available** in the panel, with one notification. From 1.9, **Install and Relaunch** downloads it, checks that it is Card Rename, newer, signed by Oz Color and accepted by macOS (notarized), replaces the app and reopens it; nothing is touched if any check fails. Where the app can't replace itself (run from the DMG, or from a folder it can't write to), **Download** opens the DMG in the browser instead.
 
 <p>
   <img src="docs/screenshots/settings.png" width="340" alt="Settings: default card names, card naming scheme, eject after renaming">

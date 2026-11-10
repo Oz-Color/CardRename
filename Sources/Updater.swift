@@ -2,7 +2,8 @@ import AppKit
 import UserNotifications
 
 /// Asks GitHub for the latest release once a day, and when the panel opens (at most hourly).
-/// A newer version shows "Update available" in the panel and one notification per version.
+/// A newer version shows "Update available" in the panel, with one notification per version, and can
+/// be installed in place, with a browser download when that isn't possible.
 @MainActor
 final class Updater: ObservableObject {
     static let shared = Updater()
@@ -14,6 +15,9 @@ final class Updater: ObservableObject {
     }
 
     @Published private(set) var available: Release?
+    @Published private(set) var installing = false
+    @Published private(set) var installProblem: String?
+    var canInstall: Bool { UpdateInstaller.canReplaceSelf }
     private var lastCheck = Date.distantPast
     private var timer: Timer?
 
@@ -48,6 +52,23 @@ final class Updater: ObservableObject {
         if let url = available?.download { NSWorkspace.shared.open(url) }
     }
 
+    /// Downloads, checks and swaps in the new version, then quits so the helper can open it.
+    func install() {
+        guard let release = available, !installing else { return }
+        guard canInstall else { return download() }
+        installing = true
+        installProblem = nil
+        Task {
+            do {
+                try await UpdateInstaller.install(from: release.download, newerThan: current)
+                NSApp.terminate(nil)
+            } catch {
+                installing = false
+                installProblem = "Couldn't install: \(error.localizedDescription). Use Download instead."
+            }
+        }
+    }
+
     /// Version and DMG link of a GitHub "latest release" answer (the release page if it has no DMG).
     nonisolated static func parse(_ data: Data) -> Release? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -74,7 +95,7 @@ final class Updater: ObservableObject {
         UserDefaults.standard.set(release.version, forKey: "notifiedUpdate")
         let content = UNMutableNotificationContent()
         content.title = "Card Rename \(release.version) is available"
-        content.body = "Open the Card Rename menu and click Download."
+        content.body = "Open the Card Rename menu to install it."
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: "update-\(release.version)", content: content, trigger: nil))
     }

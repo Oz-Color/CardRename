@@ -174,7 +174,20 @@ struct PanelView: View {
                 HStack {
                     Label("Update available: \(update.version)", systemImage: "arrow.down.circle")
                     Spacer()
-                    Button("Download") { updater.download() }
+                    if updater.canInstall {
+                        Button(updater.installing ? "Installing…" : "Install and Relaunch") { updater.install() }
+                            .disabled(updater.installing)
+                    } else {
+                        // Run from the DMG or a folder it can't write to: the browser download instead.
+                        Button("Download") { updater.download() }
+                    }
+                }
+                if let problem = updater.installProblem {
+                    HStack {
+                        Text(problem).font(.caption).foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Download") { updater.download() }.controlSize(.small)
+                    }
                 }
             }
 
