@@ -40,8 +40,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.target = self
         statusItem.button?.toolTip = "Card Rename"
 
-        let panel = NSHostingController(rootView: PanelView(engine: engine))
-        panel.sizingOptions = .preferredContentSize
+        // The panel sets the popover's size from its natural height. With the default sizing, opening
+        // Settings centred the taller content in the still-small popover (top 173 pt out of view), then
+        // slid it back; the GeometryReader keeps the content at the popover's top-left at every step.
+        let popover = self.popover
+        let panel = NSHostingController(rootView: GeometryReader { _ in
+            PanelView(engine: engine)
+                .fixedSize(horizontal: false, vertical: true)
+                // Whole points: a fractional size (803.1) made the popover shift by a pixel or two.
+                .onGeometryChange(for: CGSize.self, of: { $0.size }) { size in
+                    popover.contentSize = NSSize(width: size.width.rounded(.up), height: size.height.rounded(.up))
+                }
+        })
+        panel.sizingOptions = []
         popover.contentViewController = panel
         popover.behavior = .transient
 
@@ -84,6 +95,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popover.performClose(nil)
         } else {
             NSApp.activate(ignoringOtherApps: true)
+            // Right size from the first frame; the panel isn't laid out while closed.
+            let size = NSHostingView(rootView: PanelView(engine: .shared)).fittingSize
+            popover.contentSize = NSSize(width: size.width.rounded(.up), height: size.height.rounded(.up))
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             Updater.shared.checkIfStale()
         }
