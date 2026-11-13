@@ -22,9 +22,6 @@ Menu bar app that renames camera cards after the reel ID found in their clip nam
 
 | Card | Clips | New name |
 | --- | --- | --- |
-| Sony XDCAM, ARRI, Canon, DJI Ronin | `D902C001_260916JN.MXF` | `D902_261103` (the reel ID is the labroll; `{labroll}` alone gives `D902`) |
-| RED | `A003_C001_0916AB_001.R3D` | `A003_261103` |
-| Blackmagic | `A007_09161234_C001.braw` | `A007_261103` |
 | No reel ID (Sony `C0001.MP4`, DJI, GoPro, Lumix, DCIM) | | Next labroll, e.g. `A001_GOPRO`, named directly or suggested in a dialog (see Labroll) |
 
 Only cards still carrying a default name (UNTITLED, NO NAME, NONAME, DJI, editable in Settings) are renamed. A card with more than one reel ID is never renamed, an alert says so. Names are cut to the file system limit (FAT32 and exFAT 11 characters, APFS 27).
