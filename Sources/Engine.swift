@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import ServiceManagement
 import UserNotifications
 
@@ -27,11 +28,20 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
     private let store = UserDefaults.standard
 
     @Published var enabled: Bool { didSet { store.set(enabled, forKey: "enabled") } }
-    @Published var defaultNames: String { didSet { store.set(defaultNames, forKey: "defaultNames") } }
+    @Published var defaultNames: String { didSet { store.set(defaultNames, forKey: "defaultNames"); refreshPreviews() } }
     /// Cards without reel ID: true asks with the scheme's name filled in, false names them directly.
     @Published var askWhenNoReel: Bool { didSet { store.set(askWhenNoReel, forKey: "askWhenNoReel") } }
     @Published var showMenuBarIcon: Bool { didSet { store.set(showMenuBarIcon, forKey: "showMenuBarIcon") } }
     @Published var ejectAfterRename: Bool { didSet { store.set(ejectAfterRename, forKey: "ejectAfterRename") } }
+    /// Cards without reel ID: once renamed (or inserted again after the eject), offer to rename their clips.
+    @Published var offerClipRename: Bool { didSet { store.set(offerClipRename, forKey: "offerClipRename") } }
+    @Published var recentOpen: Bool { didSet { store.set(recentOpen, forKey: "recentOpen") } }
+    /// Panel rows of the default-named cards: suggested name (same one the rename uses), or what stops it.
+    @Published private(set) var suggestedNames: [String: String] = [:]
+    @Published private(set) var cardNotes: [String: String] = [:]
+    @Published var editedNames: [String: String] = [:]
+    private var previewing = Set<String>()
+    private var watchers = Set<AnyCancellable>()
     @Published var settingsOpen = false   // Settings section of the panel, menu bar and window alike
     @Published private(set) var recent: [RenameEntry] = []
     @Published private(set) var mountedNames = Set<String>()
@@ -52,7 +62,8 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
     /// Demo history for ./build.sh screens, shown as if the cards were still mounted.
     func showDemo(_ entries: [RenameEntry]) {
         recent = entries
-        mountedNames = Set(entries.map(\.new))
+        mountedNames = Set(entries.map(\.new) + ["UNTITLED"])
+        suggestedNames = ["UNTITLED": "A002_K7P3"]
     }
     #endif
 
@@ -62,7 +73,16 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
         askWhenNoReel = store.object(forKey: "askWhenNoReel") as? Bool ?? true
         showMenuBarIcon = store.object(forKey: "showMenuBarIcon") as? Bool ?? true
         ejectAfterRename = store.object(forKey: "ejectAfterRename") as? Bool ?? false
+        offerClipRename = store.object(forKey: "offerClipRename") as? Bool ?? true
+        recentOpen = store.object(forKey: "recentOpen") as? Bool ?? true
         super.init()
+        // A new scheme, next labroll or Cam ID changes the suggested names.
+        let labroll = LabrollStore.shared
+        labroll.$cardScheme.map { _ in () }.merge(with: labroll.$nextLabroll.map { _ in () }, labroll.$camID.map { _ in () })
+            .dropFirst(3)
+            .debounce(for: .milliseconds(400), scheduler: RunLoop.main)
+            .sink { [weak self] in self?.refreshPreviews(again: true) }
+            .store(in: &watchers)
         loadLog()
         refreshMounted()
         setUpNotifications()
@@ -98,27 +118,52 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
         for card in cards { await rename(card) }
     }
 
-    func rename(_ card: String) async { await process(URL(fileURLWithPath: "/Volumes/\(card)"), auto: false) }
+    /// The name in the card's panel row (suggested or edited); without one, the usual dialog.
+    func rename(_ card: String) async {
+        let name = shownName(card).trimmingCharacters(in: .whitespaces)
+        await process(URL(fileURLWithPath: "/Volumes/\(card)"), auto: false, name: name.isEmpty ? nil : name)
+    }
 
-    /// `auto`: started by a mount, stay silent unless a card is renamed or something is wrong.
-    func process(_ volume: URL, auto: Bool) async {
-        let path = volume.path
-        let current = volume.lastPathComponent
-        guard path.hasPrefix("/Volumes/"),
-              CardScan.isDefaultName(current, defaults: defaultNameList),
-              !inProgress.contains(path),
-              let info = VolumeInfo(path: path) else { return }
+    func shownName(_ card: String) -> String { editedNames[card] ?? suggestedNames[card] ?? "" }
 
-        let uuid = (try? volume.resourceValues(forKeys: [.volumeUUIDStringKey]))?.volumeUUIDString ?? ""
-        if auto && ignoredUUIDs().contains(uuid) { return }   // renaming was undone on this card
+    /// Scan default-named cards for their panel rows; `again` after a scheme change (edits kept).
+    private func refreshPreviews(again: Bool = false) {
+        let cards = Set(defaultNamedCards)
+        for dict in [\Engine.suggestedNames, \Engine.cardNotes] as [ReferenceWritableKeyPath<Engine, [String: String]>] {
+            self[keyPath: dict] = self[keyPath: dict].filter { cards.contains($0.key) }
+        }
+        editedNames = editedNames.filter { cards.contains($0.key) }
+        for card in cards where (again || suggestedNames[card] == nil && cardNotes[card] == nil) && !previewing.contains(card) {
+            previewing.insert(card)
+            Task {
+                let plan = await plan(URL(fileURLWithPath: "/Volumes/\(card)"))
+                previewing.remove(card)
+                guard defaultNamedCards.contains(card), let plan else { return }
+                switch plan.proposal {
+                case .reel, .noReel: suggestedNames[card] = plan.name; cardNotes[card] = nil
+                case .multipleReels(let reels): cardNotes[card] = "More than one reel ID: \(reels.joined(separator: " ")). Not renamed."
+                case .noClips: cardNotes[card] = "No video clip found."
+                case .unreadable: cardNotes[card] = "Card Rename can't read it: allow Removable Volumes in System Settings > Privacy & Security."
+                }
+            }
+        }
+    }
 
-        inProgress.insert(path)
-        defer { inProgress.remove(path) }
+    /// What a card would be named, worked out without renaming it.
+    struct Plan {
+        let info: VolumeInfo
+        let maxLength: Int
+        let proposal: CardScan.Proposal
+        let isCard: Bool
+        let name: String   // reel or labroll name from the card scheme, "" when nothing to rename
+        let labrollCard: (labroll: String, camera: String)?   // card without reel ID named after its labroll
+    }
 
+    private func plan(_ volume: URL) async -> Plan? {
+        guard let info = VolumeInfo(path: volume.path) else { return nil }
         let maxLength = CardScan.maxLabelLength(fsType: info.fsType)
         let scheme = LabrollStore.shared.cardScheme
         let needsClipDate = scheme.dateSource == .recording && scheme.uses("date")
-        busy = true
         let (isCard, proposal, camera, oldestClip) = await Task.detached {
             let proposal = CardScan.analyze(root: volume, maxLength: maxLength)
             var camera = ""
@@ -133,13 +178,61 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
             }
             return (proposal == .unreadable || CardScan.looksLikeCard(volume), proposal, camera, oldestClip)
         }.value
-        busy = false
 
-        if auto && !isCard { return }   // a USB stick or a disk image, not a camera card
+        var name = ""
+        var labrollCard: (labroll: String, camera: String)?
+        switch proposal {
+        case .reel(let reel):
+            // The card scheme with the reel ID as labroll: D902, D902_261103... No camera when only
+            // the generic CARD was found (ARRI, RED, Blackmagic cards).
+            let values = NameScheme.Values(labroll: reel, date: oldestClip ?? Date(), cam: camera == "CARD" ? "" : camera,
+                                           random: NameScheme.randomCharacters())
+            name = scheme.cardName(values, maxLength: maxLength)
+        case .noReel(let suggestion):
+            // A001_GOPRO: same labroll as the clips will get in the Labroll window.
+            // MODEL_YYMMDD only when the next labroll field is empty.
+            name = suggestion
+            let labroll = LabrollStore.shared.nextLabroll.trimmingCharacters(in: .whitespaces)
+            if !labroll.isEmpty {
+                let camID = LabrollStore.shared.camID.trimmingCharacters(in: .whitespaces)
+                let card = (labroll: labroll, camera: camID.isEmpty ? camera : camID)
+                let values = NameScheme.Values(labroll: card.labroll, date: oldestClip ?? Date(), cam: card.camera,
+                                               random: NameScheme.randomCharacters())
+                name = scheme.cardName(values, maxLength: maxLength)
+                labrollCard = card
+            }
+        default:
+            break
+        }
+        return Plan(info: info, maxLength: maxLength, proposal: proposal, isCard: isCard, name: name, labrollCard: labrollCard)
+    }
+
+    /// `auto`: started by a mount, stay silent unless a card is renamed or something is wrong.
+    /// `name`: the name shown in the panel, used as is (no dialog).
+    func process(_ volume: URL, auto: Bool, name: String? = nil) async {
+        let path = volume.path
+        let current = volume.lastPathComponent
+        guard path.hasPrefix("/Volumes/"),
+              CardScan.isDefaultName(current, defaults: defaultNameList),
+              !inProgress.contains(path) else { return }
+
+        let uuid = (try? volume.resourceValues(forKeys: [.volumeUUIDStringKey]))?.volumeUUIDString ?? ""
+        if auto && ignoredUUIDs().contains(uuid) { return }   // renaming was undone on this card
+
+        inProgress.insert(path)
+        defer { inProgress.remove(path) }
+
+        busy = true
+        let found = await plan(volume)
+        busy = false
+        guard let plan = found else { return }
+        let info = plan.info, maxLength = plan.maxLength
+        let labrollCard = plan.labrollCard
+
+        if auto && !plan.isCard { return }   // a USB stick or a disk image, not a camera card
 
         var newName: String
-        var labrollCard: (labroll: String, camera: String)?   // card without reel ID named after its labroll
-        switch proposal {
+        switch plan.proposal {
         case .unreadable:
             alert("Cannot read \(current)",
                   "macOS does not let Card Rename read this card.\nIn System Settings > Privacy & Security > Files and Folders, allow Removable Volumes for Card Rename, then mount the card again.")
@@ -151,29 +244,16 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
             alert("\(current) holds more than one reel ID",
                   "\(reels.joined(separator: " "))\nNothing renamed. Check the card before offloading.")
             return
-        case .reel(let reel):
-            // The card scheme with the reel ID as labroll: D902, D902_261103... No camera when only
-            // the generic CARD was found (ARRI, RED, Blackmagic cards).
-            let values = NameScheme.Values(labroll: reel, date: oldestClip ?? Date(), cam: camera == "CARD" ? "" : camera,
-                                           random: NameScheme.randomCharacters())
-            newName = scheme.cardName(values, maxLength: maxLength)
-        case .noReel(var suggestion):
-            // A001_GOPRO: same labroll as the clips will get in the Labroll window.
-            // MODEL_YYMMDD only when the next labroll field is empty.
-            let labroll = LabrollStore.shared.nextLabroll.trimmingCharacters(in: .whitespaces)
-            if !labroll.isEmpty {
-                let camID = LabrollStore.shared.camID.trimmingCharacters(in: .whitespaces)
-                let card = (labroll: labroll, camera: camID.isEmpty ? camera : camID)
-                let values = NameScheme.Values(labroll: card.labroll, date: oldestClip ?? Date(), cam: card.camera,
-                                               random: NameScheme.randomCharacters())
-                suggestion = scheme.cardName(values, maxLength: maxLength)
-                labrollCard = card
-            }
-            if askWhenNoReel {
-                guard let answer = askName(current: current, suggestion: suggestion, maxLength: maxLength) else { return }
+        case .reel:
+            newName = name.map { CardScan.cleanName($0, maxLength: maxLength) } ?? plan.name
+        case .noReel:
+            if let name {
+                newName = CardScan.cleanName(name, maxLength: maxLength)
+            } else if askWhenNoReel {
+                guard let answer = askName(current: current, suggestion: plan.name, maxLength: maxLength) else { return }
                 newName = CardScan.cleanName(answer, maxLength: maxLength)
             } else {
-                newName = suggestion
+                newName = plan.name
             }
         }
 
@@ -204,7 +284,7 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
             LabrollStore.shared.consume(card.labroll, suggested: labrollCard?.labroll)
             rememberLabrollCard(uuid, labroll: card.labroll, camera: card.camera, waitingForMount: ejectAfterRename)
             if !ejectAfterRename {
-                sendToLabroll(URL(fileURLWithPath: "/Volumes/\(newName)"), labroll: card.labroll, camera: card.camera)
+                offerLabroll(URL(fileURLWithPath: "/Volumes/\(newName)"), labroll: card.labroll, camera: card.camera)
             }
         }
 
@@ -236,7 +316,19 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
         guard let uuid = (try? volume.resourceValues(forKeys: [.volumeUUIDStringKey]))?.volumeUUIDString,
               let card = labrollCards[uuid], card.count == 3, card[2] == "1" else { return }
         labrollCards[uuid] = [card[0], card[1], "0"]
-        sendToLabroll(volume, labroll: card[0], camera: card[1])
+        offerLabroll(volume, labroll: card[0], camera: card[1])
+    }
+
+    /// A card without reel ID is ready (renamed, or inserted again): ask before listing its clips.
+    private func offerLabroll(_ volume: URL, labroll: String, camera: String) {
+        guard offerClipRename else { return }
+        let alert = NSAlert()
+        alert.messageText = "Rename the clips of \(volume.lastPathComponent)?"
+        alert.informativeText = "Its clips have no reel ID. The Labroll window lists them as \(labroll)C001, \(labroll)C002…, before and after; nothing is copied or renamed until you click there."
+        alert.addButton(withTitle: "Open Labroll")
+        alert.addButton(withTitle: "Not Now")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn { sendToLabroll(volume, labroll: labroll, camera: camera) }
     }
 
     /// "Clips" button of a recent rename.
@@ -311,6 +403,7 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
     private func refreshMounted() {
         let volumes = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: nil, options: [.skipHiddenVolumes]) ?? []
         mountedNames = Set(volumes.filter { $0.path.hasPrefix("/Volumes/") }.map(\.lastPathComponent))
+        refreshPreviews()
     }
 
     private func diskutilRename(_ target: String, to name: String) async -> (ok: Bool, output: String) {

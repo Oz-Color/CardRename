@@ -123,10 +123,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // The window follows the panel's size, Settings open or closed. Resized after SwiftUI's layout
             // pass: with .preferredContentSize, macOS resized it during the pass, which asked for a second
             // layout midway, and macOS 26 stops the app for that (crash when opening Settings).
-            let content = NSHostingController(rootView: GeometryReader { _ in
+            let content = NSHostingController(rootView: GeometryReader { [weak self] _ in
                 PanelView(engine: .shared, inWindow: true)
                     .fixedSize(horizontal: false, vertical: true)
-                    .onGeometryChange(for: CGSize.self, of: { $0.size }) { [weak self] size in
+                    .onGeometryChange(for: CGSize.self, of: { $0.size }) { size in
                         DispatchQueue.main.async { self?.fitWindow(to: size) }
                     }
             })
@@ -246,15 +246,31 @@ struct PanelView: View {
             Toggle("Rename cards automatically", isOn: $engine.enabled)
                 .toggleStyle(.switch)
 
-            // Cards still named UNTITLED, NO NAME...: renamed one by one, or all at once below.
-            ForEach(engine.defaultNamedCards, id: \.self) { card in
-                HStack {
-                    Label(card, systemImage: "sdcard")
-                    Spacer()
-                    Button("Rename") { Task { await engine.rename(card) } }
-                        .controlSize(.small)
-                        .disabled(engine.busy)
+            // Cards still named UNTITLED, NO NAME...: the new name shown and editable before renaming.
+            if !engine.defaultNamedCards.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(engine.defaultNamedCards, id: \.self) { card in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(card, systemImage: "sdcard.fill").font(.headline)
+                            if let note = engine.cardNotes[card] {
+                                Text(note).font(.caption).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else {
+                                HStack {
+                                    TextField("New name", text: Binding(get: { engine.shownName(card) },
+                                                                        set: { engine.editedNames[card] = $0 }))
+                                    Button("Rename now") { Task { await engine.rename(card) } }
+                                        .buttonStyle(.borderedProminent)
+                                        .disabled(engine.busy || engine.shownName(card).isEmpty)
+                                }
+                            }
+                        }
+                    }
                 }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.14)))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentColor.opacity(0.5)))
             }
 
             HStack {
@@ -266,33 +282,37 @@ struct PanelView: View {
 
             Divider()
 
-            Text("Recent renames").font(.subheadline).foregroundStyle(.secondary)
-            if engine.recent.isEmpty {
-                Text("None yet").foregroundStyle(.secondary)
-            }
-            ForEach(engine.recent.prefix(8)) { entry in
-                HStack {
-                    Text(entry.timeLabel).monospacedDigit().foregroundStyle(.secondary)
-                    // New name on its own line: long scheme names (A001_20261109_GOPRO) no longer wrap.
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(entry.new).lineLimit(1).truncationMode(.middle)
-                        Text("was \(entry.old)").font(.caption).foregroundStyle(.secondary)
+            DisclosureGroup("Recent renames", isExpanded: $engine.recentOpen) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if engine.recent.isEmpty {
+                        Text("None yet").foregroundStyle(.secondary)
                     }
-                    .help("\(entry.old) → \(entry.new)")
-                    Spacer()
-                    if entry.undone {
-                        Text("undone").foregroundStyle(.secondary)
-                    } else if engine.isMounted(entry) {
-                        Group {
-                            Button("Clips") { engine.sendToLabroll(entry) }
-                                .help("List this card's clips in the Labroll window")
-                            Button("Undo") { Task { await engine.undo(entry) } }
+                    ForEach(engine.recent.prefix(8)) { entry in
+                        HStack {
+                            Text(entry.timeLabel).monospacedDigit().foregroundStyle(.secondary)
+                            // New name on its own line: long scheme names (A001_20261109_GOPRO) no longer wrap.
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(entry.new).lineLimit(1).truncationMode(.middle)
+                                Text("was \(entry.old)").font(.caption).foregroundStyle(.secondary)
+                            }
+                            .help("\(entry.old) → \(entry.new)")
+                            Spacer()
+                            if entry.undone {
+                                Text("undone").foregroundStyle(.secondary)
+                            } else if engine.isMounted(entry) {
+                                Group {
+                                    Button("Clips") { engine.sendToLabroll(entry) }
+                                        .help("List this card's clips in the Labroll window")
+                                    Button("Undo") { Task { await engine.undo(entry) } }
+                                }
+                                .controlSize(.small)
+                            } else {
+                                Text("not mounted").foregroundStyle(.tertiary)
+                            }
                         }
-                        .controlSize(.small)
-                    } else {
-                        Text("not mounted").foregroundStyle(.tertiary)
                     }
                 }
+                .padding(.top, 6)
             }
 
             Divider()
@@ -318,6 +338,10 @@ struct PanelView: View {
                     HStack(spacing: 4) {
                         Toggle("Eject the card after renaming", isOn: $engine.ejectAfterRename)
                         InfoButton("After a rename, eject the card and insert it again before offloading. Until then, Finder and offload apps may keep the old name, and a second card mounted with the same \"Untitled\" name may not show up.")
+                    }
+                    HStack(spacing: 4) {
+                        Toggle("Offer to rename clips without reel ID", isOn: $engine.offerClipRename)
+                        InfoButton("Cards without reel ID (GoPro, DJI, Sony C0001.MP4…): once the card is renamed, or inserted again after the eject, Card Rename asks whether to list its clips in the Labroll window and rename them A001C001… Off, use the Clips button of a recent rename.")
                     }
                     Toggle("Open at login", isOn: Binding(get: { engine.openAtLogin },
                                                           set: { engine.setOpenAtLogin($0) }))

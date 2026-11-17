@@ -13,6 +13,7 @@ struct LabrollClip: Identifiable {
     let random = NameScheme.randomCharacters()
     var state = State.waiting
     var newName = ""
+    var renamedInPlace = false   // done by "Rename only": Undo gives it its original name back
 }
 
 /// The clips of one card (or of one drop), renamed under one labroll.
@@ -25,6 +26,7 @@ struct LabrollRoll: Identifiable {
 
     var size: Int64 { clips.reduce(0) { $0 + $1.size } }
     var pending: [LabrollClip] { clips.filter { $0.state != .done } }
+    var canUndo: Bool { clips.contains(where: \.renamedInPlace) }
 }
 
 final class CancelFlag: @unchecked Sendable {
@@ -236,7 +238,7 @@ final class LabrollStore: ObservableObject {
                     do {
                         if renameOnly {
                             let url = try Labroll.renameInPlace(clip.url, to: newName)
-                            await self.update(roll.id, clip.id) { $0.url = url; $0.state = .done }
+                            await self.update(roll.id, clip.id) { $0.url = url; $0.state = .done; $0.renamedInPlace = true }
                             await self.advance(clip.size)
                             lines.append((clip.originalName, newName, ""))
                         } else {
@@ -272,6 +274,31 @@ final class LabrollStore: ObservableObject {
     }
 
     func stop() { cancel.set() }
+
+    /// Clips of `roll` renamed in place get their original names back (never overwriting a file).
+    func undoRename(_ roll: LabrollRoll) {
+        guard !running, let r = rolls.firstIndex(where: { $0.id == roll.id }) else { return }
+        var lines: [(old: String, new: String, hash: String)] = []
+        var failed = 0
+        for c in rolls[r].clips.indices where rolls[r].clips[c].renamedInPlace {
+            let clip = rolls[r].clips[c]
+            do {
+                rolls[r].clips[c].url = try Labroll.renameInPlace(clip.url, to: clip.originalName)
+                rolls[r].clips[c].state = .waiting
+                rolls[r].clips[c].newName = ""
+                rolls[r].clips[c].renamedInPlace = false
+                lines.append((clip.url.lastPathComponent, clip.originalName, ""))
+            } catch {
+                failed += 1
+                rolls[r].clips[c].state = .failed("Undo: \(error.localizedDescription)")
+            }
+        }
+        if !lines.isEmpty {
+            Self.append("### UNDO\n" + Labroll.logText(start: Date(), end: Date(), source: roll.source, lines: lines) + "\n", to: clipsLogURL)
+        }
+        status = "\(lines.count) clip\(lines.count == 1 ? "" : "s") back to \(lines.count == 1 ? "its" : "their") original name"
+            + (failed > 0 ? ", \(failed) failed (hover the clip for the reason)." : ".")
+    }
 
     private func update(_ rollID: UUID, _ clipID: UUID, _ change: (inout LabrollClip) -> Void) {
         guard let r = rolls.firstIndex(where: { $0.id == rollID }),
@@ -406,6 +433,11 @@ struct RollView: View {
                 Text("\(roll.clips.count) clips, \(ByteCountFormatter.string(fromByteCount: roll.size, countStyle: .file))")
                     .foregroundStyle(.secondary)
                 Spacer()
+                if roll.canUndo {
+                    Button("Undo rename") { store.undoRename(roll) }
+                        .controlSize(.small)
+                        .help("Give the clips renamed on the card their original names back")
+                }
                 Button { store.remove(roll) } label: { Image(systemName: "xmark.circle") }
                     .buttonStyle(.borderless)
                     .help("Remove from the list")
