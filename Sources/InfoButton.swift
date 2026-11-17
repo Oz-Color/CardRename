@@ -13,8 +13,11 @@ struct InfoButton: NSViewRepresentable {
         let button = NSButton(image: image ?? NSImage(), target: context.coordinator, action: #selector(Coordinator.toggle(_:)))
         button.isBordered = false
         button.contentTintColor = .secondaryLabelColor
-        button.setContentHuggingPriority(.required, for: .horizontal)
-        button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        // Its own size in both directions: free vertically, it stretched a row when its window had room to spare.
+        for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
+            button.setContentHuggingPriority(.required, for: axis)
+            button.setContentCompressionResistancePriority(.required, for: axis)
+        }
         return button
     }
 

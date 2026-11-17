@@ -29,7 +29,7 @@ Only cards still carrying a default name (UNTITLED, NO NAME, NONAME, DJI, editab
 ## Menu
 
 - **Rename cards automatically**: on/off switch. The icon is filled when on.
-- **Rename cards now**: rename the cards already mounted.
+- **Rename all cards now**: rename the cards already mounted. Each card still carrying a default name is also listed above it, with its own **Rename** button.
 - **Labroll…**: opens the Labroll window (below).
 - **Recent renames**: Clips (list the card in the Labroll window) and Undo buttons while the card is mounted.
 - **Settings**: default card names; cards without reel ID named automatically or asked with the name suggested; the card naming scheme (below); eject the card after renaming, open at login, show icon in menu bar.

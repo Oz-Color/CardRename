@@ -90,9 +90,10 @@ final class LabrollStore: ObservableObject {
         return labroll
     }
 
-    /// A card was named after `labroll`: move the counter on, unless it was changed meanwhile.
-    func consume(_ labroll: String) {
-        if nextLabroll.trimmingCharacters(in: .whitespaces) == labroll { nextLabroll = Labroll.next(labroll) }
+    /// A card was named after `labroll` (`suggested` if the name was edited): move the counter on
+    /// from it, unless it was changed meanwhile.
+    func consume(_ labroll: String, suggested: String? = nil) {
+        if nextLabroll.trimmingCharacters(in: .whitespaces) == (suggested ?? labroll) { nextLabroll = Labroll.next(labroll) }
     }
 
     /// List the clips under `urls` as a new roll. Without `labroll`, the next one is reserved.

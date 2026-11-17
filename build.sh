@@ -89,9 +89,13 @@ if [ "${1:-}" = "screens" ]; then
   SHOT="build/Screenshots.app"
   /bin/rm -rf "build/Screenshots.app"
   /usr/bin/ditto "$APP" "$SHOT"
+  # Its own identity, and deleted afterwards: with Card Rename's, macOS took this copy for the app
+  # (the login item opened it instead of /Applications/Card Rename.app). It also shows default settings.
+  /usr/libexec/PlistBuddy -c 'Set CFBundleIdentifier local.cardrename.screenshots' "$SHOT/Contents/Info.plist"
   swiftc -O -swift-version 5 -parse-as-library -D SNAPSHOTS -target arm64-apple-macos14 \
     Sources/*.swift Tools/screenshots.swift -o "$SHOT/Contents/MacOS/CardRename"
   codesign --force --sign - "$SHOT"
   mkdir -p docs/screenshots
   "$SHOT/Contents/MacOS/CardRename" docs/screenshots
+  /bin/rm -rf "build/Screenshots.app"
 fi

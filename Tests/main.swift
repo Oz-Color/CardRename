@@ -137,6 +137,7 @@ expectEqual("clip name without cam ID", Labroll.clipName(labroll: " A001 ", inde
             "A001C012_20261102.mov")
 expectEqual("next labroll", [Labroll.next("A001"), Labroll.next("B099"), Labroll.next("A999"), Labroll.next("DAY")],
             ["A002", "B100", "A1000", "DAY"])
+expectEqual("labroll of an edited card name", [Labroll.leading("B004_X7K2"), Labroll.leading("A1001"), Labroll.leading("GOPRO_1")], ["B004", "A1001", nil])
 expectEqual("card name, APFS", Labroll.cardName(labroll: "A001", camera: "GOPRO", date: day, maxLength: 27), "A001_20261102_GOPRO")
 expectEqual("card name, 15 characters", Labroll.cardName(labroll: "A001", camera: "GOPRO", date: day, maxLength: 15), "A001_GOPRO")
 expectEqual("card name, 15 characters DJI", Labroll.cardName(labroll: "A001", camera: "DJI", date: day, maxLength: 15), "A001_261102_DJI")

@@ -1,4 +1,5 @@
 import Combine
+import ServiceManagement
 import SwiftUI
 
 #if !SNAPSHOTS   // ./build.sh screens has its own entry point
@@ -12,6 +13,10 @@ struct CardRenameApp: App {
             .commands {
                 CommandGroup(replacing: .appInfo) {
                     Button("About Card Rename") { About.show() }
+                }
+                // The Settings scene alone opened an empty window: Settings are in the panel.
+                CommandGroup(replacing: .appSettings) {
+                    Button("Settings…") { appDelegate.showSettings() }.keyboardShortcut(",")
                 }
             }
     }
@@ -32,6 +37,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor func applicationDidFinishLaunching(_ notification: Notification) {
         let engine = Engine.shared
+        // Login item registered again from this copy: it may point at another one (a moved app, an old build).
+        if SMAppService.mainApp.status == .enabled { try? SMAppService.mainApp.register() }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.autosaveName = "CardRename"
@@ -49,7 +56,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .fixedSize(horizontal: false, vertical: true)
                 // Whole points: a fractional size (803.1) made the popover shift by a pixel or two.
                 .onGeometryChange(for: CGSize.self, of: { $0.size }) { size in
-                    popover.contentSize = NSSize(width: size.width.rounded(.up), height: size.height.rounded(.up))
+                    // After the layout pass, never during it (see showWindow).
+                    DispatchQueue.main.async {
+                        popover.contentSize = NSSize(width: size.width.rounded(.up), height: size.height.rounded(.up))
+                    }
                 }
         })
         panel.sizingOptions = []
@@ -110,15 +120,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   backing: .buffered, defer: false)
             window.title = "Card Rename"
             window.isReleasedWhenClosed = false
-            // The window follows the panel's size, Settings open or closed.
-            let content = NSHostingController(rootView: PanelView(engine: .shared, inWindow: true))
-            content.sizingOptions = .preferredContentSize
+            // The window follows the panel's size, Settings open or closed. Resized after SwiftUI's layout
+            // pass: with .preferredContentSize, macOS resized it during the pass, which asked for a second
+            // layout midway, and macOS 26 stops the app for that (crash when opening Settings).
+            let content = NSHostingController(rootView: GeometryReader { _ in
+                PanelView(engine: .shared, inWindow: true)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onGeometryChange(for: CGSize.self, of: { $0.size }) { [weak self] size in
+                        DispatchQueue.main.async { self?.fitWindow(to: size) }
+                    }
+            })
+            content.sizingOptions = []
             window.contentViewController = content
-            window.setContentSize(content.view.fittingSize)   // size first, so center() uses the real size
+            // Size first, so center() uses the real size.
+            window.setContentSize(NSHostingView(rootView: PanelView(engine: .shared, inWindow: true)).fittingSize)
             window.center()
             self.window = window
         }
         if let window { opened(window) }
+    }
+
+    /// Top edge kept in place, bottom kept on screen.
+    @MainActor private func fitWindow(to size: CGSize) {
+        guard let window else { return }
+        let old = window.frame
+        var frame = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: size.width.rounded(.up), height: size.height.rounded(.up)))
+        guard frame.size != old.size else { return }
+        frame.origin = NSPoint(x: old.minX, y: old.maxY - frame.height)
+        if let screen = window.screen?.visibleFrame, frame.minY < screen.minY {
+            frame.origin.y = min(screen.minY, screen.maxY - frame.height)
+        }
+        window.setFrame(frame, display: true)
+    }
+
+    /// App menu > Settings… (⌘,): the window with Settings open.
+    @MainActor func showSettings() {
+        Engine.shared.settingsOpen = true
+        showWindow()
     }
 
     private var labrollWindow: NSWindow?
@@ -208,8 +246,19 @@ struct PanelView: View {
             Toggle("Rename cards automatically", isOn: $engine.enabled)
                 .toggleStyle(.switch)
 
+            // Cards still named UNTITLED, NO NAME...: renamed one by one, or all at once below.
+            ForEach(engine.defaultNamedCards, id: \.self) { card in
+                HStack {
+                    Label(card, systemImage: "sdcard")
+                    Spacer()
+                    Button("Rename") { Task { await engine.rename(card) } }
+                        .controlSize(.small)
+                        .disabled(engine.busy)
+                }
+            }
+
             HStack {
-                Button("Rename cards now") { Task { await engine.renameNow() } }
+                Button("Rename all cards now") { Task { await engine.renameNow() } }
                 Spacer()
                 Button("Labroll…") { LabrollStore.shared.openWindow?() }
                     .help("Rename the clips of a card A001C001_YYYYMMDD_CAMID, copied or in place")

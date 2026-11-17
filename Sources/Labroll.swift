@@ -140,6 +140,11 @@ enum Labroll {
         return "\(prefix)\(String(format: "%03d", number + 1))"
     }
 
+    /// Labroll at the start of a card name: A003 in A003_X7K2, nil for GOPRO_1.
+    static func leading(_ name: String) -> String? {
+        (try? Regex("^[A-Za-z]+[0-9]+").prefixMatch(in: name)).flatMap { $0.map { String(name[$0.range]) } }
+    }
+
     /// Card name LABROLL_YYYYMMDD_CAMERA with the default scheme, parts dropped until it fits the label limit:
     /// A001_20261102_GOPRO -> A001_261102_GOPRO -> A001_GOPRO -> A001.
     static func cardName(labroll: String, camera: String, date: Date, maxLength: Int) -> String {

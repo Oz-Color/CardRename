@@ -85,18 +85,20 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
 
     // MARK: - Renaming
 
+    /// Mounted volumes still carrying a default name (UNTITLED, NO NAME...), listed in the panel.
+    var defaultNamedCards: [String] { mountedNames.filter { CardScan.isDefaultName($0, defaults: defaultNameList) }.sorted() }
+
     /// Rename every mounted card that still has a default name.
     func renameNow() async {
-        let volumes = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: nil, options: [.skipHiddenVolumes]) ?? []
-        let cards = volumes.filter {
-            $0.path.hasPrefix("/Volumes/") && CardScan.isDefaultName($0.lastPathComponent, defaults: defaultNameList)
-        }
+        let cards = defaultNamedCards
         if cards.isEmpty {
             alert("No card to rename", "No mounted volume has a default name (\(defaultNames)).")
             return
         }
-        for card in cards { await process(card, auto: false) }
+        for card in cards { await rename(card) }
     }
+
+    func rename(_ card: String) async { await process(URL(fileURLWithPath: "/Volumes/\(card)"), auto: false) }
 
     /// `auto`: started by a mount, stay silent unless a card is renamed or something is wrong.
     func process(_ volume: URL, auto: Bool) async {
@@ -196,8 +198,10 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
         recent.insert(entry, at: 0)
         appendLog(entry, undo: false)
 
-        if let card = labrollCard {
-            LabrollStore.shared.consume(card.labroll)
+        if var card = labrollCard {
+            // Name edited in the dialog (B004_X7K2): its labroll is used, and the counter goes on from it.
+            if !newName.hasPrefix(card.labroll), let typed = Labroll.leading(newName) { card.labroll = typed.uppercased() }
+            LabrollStore.shared.consume(card.labroll, suggested: labrollCard?.labroll)
             rememberLabrollCard(uuid, labroll: card.labroll, camera: card.camera, waitingForMount: ejectAfterRename)
             if !ejectAfterRename {
                 sendToLabroll(URL(fileURLWithPath: "/Volumes/\(newName)"), labroll: card.labroll, camera: card.camera)

@@ -8,6 +8,7 @@ import SwiftUI
 struct Screenshots {
     @MainActor static func main() {
         NSApplication.shared.setActivationPolicy(.regular)   // an active app draws controls in colour
+        guard CommandLine.arguments.count > 1 else { print("usage: Screenshots <folder>"); return }
         let folder = CommandLine.arguments[1]
         let engine = Engine.shared
         let now = Date()

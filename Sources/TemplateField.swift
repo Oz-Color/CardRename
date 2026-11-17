@@ -263,6 +263,13 @@ struct SchemeEditor: View {
         if forClips && !["clip", "name", "random"].contains(where: scheme.uses) {
             result.append("Without Clip #, Original name or Random, the clips of a card get the same name.")
         }
+        if !forClips {
+            let full = CardScan.cleanName(scheme.render(values), maxLength: .max)
+            let short = scheme.cardName(values, maxLength: 11)
+            if full != short {
+                result.append("exFAT and FAT32 cards hold 11 characters: \(full) is shortened to \(short).")
+            }
+        }
         return result
     }
 }
