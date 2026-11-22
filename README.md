@@ -24,6 +24,10 @@ Menu bar app that renames camera cards after the reel ID found in their clip nam
 | --- | --- | --- |
 | No reel ID (Sony `C0001.MP4`, DJI, GoPro, Lumix, DCIM) | | Next labroll, e.g. `A001_GOPRO`, named directly or suggested in a dialog (see Labroll) |
 
+**Camera letter.** The `{letter}` token of the card scheme is the camera letter found in the clip names: `CAM_A_0008` (Sony), `A001C001…`, `A_0001C001…` (Alexa 35), `B003_B012…` (RED), `C007_…` (Blackmagic), or `A_CAM` / `CAM_A` anywhere in the name. The letter most clips carry wins, so a few stray clips from another camera don't change it; with no letter, or two tied, the token is left empty. A card scheme `{letter} CAM` names cards `A CAM`, `B CAM`… (a card named without `{labroll}` doesn't use up the next labroll). Card labels keep spaces.
+
+RED clips from any camera (`B003_B012…`, not only `A003_C001…`) and ARRI Alexa 35 / Mini LF clips (`A_0001C001…`, reel `A_0001`) are read as reels.
+
 Only cards still carrying a default name (UNTITLED, NO NAME, NONAME, DJI, editable in Settings) are renamed. A card with more than one reel ID is never renamed, an alert says so. Names are cut to the file system limit (FAT32 and exFAT 11 characters, APFS 27).
 
 ## Menu
@@ -78,6 +82,7 @@ Clip and card names follow two templates: clips under **Clip naming scheme** in 
 | `{cam}` | Cam ID, or the camera found on the card | `GOPRO` |
 | `{name}` | original clip name, without extension (clips only) | `GX010001` |
 | `{random:4}` | random characters (A-Z 2-9, no 0/O 1/I), against duplicate names | `X7K2` |
+| `{letter}` | camera letter most clips on the card carry (cards only, see below) | `A` |
 
 Defaults: clips `{labroll}C{clip:3}_{date:YYYYMMDD}_{cam}`, cards `{labroll}_{date:YYYYMMDD}_{cam}`. Each name is a token field: drag a token chip into the name (or click it to add it at the end), drag tokens to move them, and use the arrow on a Clip, date or Random token to change its digits, format or length. Text typed between tokens is kept as is. An empty token takes its separator with it (no Cam ID gives `A001C001_20261102`). The date is the day of the copy or rename, or the recording date (cards: oldest clip on the card). A live example shows the result, and card labels are shortened to fit 11 characters (FAT32, exFAT): YYYY becomes YY, then the date, camera and original name are left out, random characters kept.
 

@@ -69,7 +69,8 @@ enum CardScan {
 
     private static let reelPatterns = [
         try! Regex("^([A-Z0-9]{4})C[0-9]{3,4}_"),       // Sony XDCAM, ARRI, Canon, DJI Ronin
-        try! Regex("^([A-Z][0-9]{3})_C[0-9]{3}_"),      // RED
+        try! Regex("^([A-Z]_[0-9]{4})C[0-9]{3}"),       // ARRI Alexa 35 / Mini LF (A_0001C001)
+        try! Regex("^([A-Z][0-9]{3})_[A-Z][0-9]{3}_"),  // RED, any camera letter (A003_C001, B003_B012)
         try! Regex("^([A-Z][0-9]{3})_[0-9]{8}_C[0-9]{3}"), // Blackmagic
     ]
 
@@ -87,6 +88,38 @@ enum CardScan {
             }
         }
         return reels.sorted()
+    }
+
+    // MARK: - Camera letter (A, B, C... -> "A CAM")
+
+    private static let letterPatterns = [
+        try! Regex("^([A-Z])[0-9]{3}C[0-9]{3,4}"),            // A001C001 (Sony, ARRI, Canon, Ronin)
+        try! Regex("^([A-Z])_[0-9]{4}C[0-9]{3}"),             // A_0001C001 (ARRI Alexa 35)
+        try! Regex("^([A-Z])[0-9]{3}_"),                      // A003_C001 (RED), A007_0916... (Blackmagic)
+        try! Regex("(?:^|[^A-Z0-9])([A-Z])[ _-]?CAM(?:[^A-Z]|$)"),  // A_CAM_0001, ACAM001, CLIP-B-CAM
+        try! Regex("(?:^|[^A-Z0-9])CAM(?:ERA)?[ _-]?([A-Z])(?:[^A-Z]|$)"),  // CAM_A_0001, CAMERA-B, CAMC001
+    ]
+
+    /// Camera letter of one clip name, nil when the name carries none (GX010001, C0001, DJI_0001...).
+    static func cameraLetter(in name: String) -> Character? {
+        let stem = (name as NSString).deletingPathExtension.uppercased()
+        for pattern in letterPatterns {
+            if let match = try? pattern.firstMatch(in: stem), let letter = match.output[1].substring?.first {
+                return letter
+            }
+        }
+        return nil
+    }
+
+    /// The camera letter most clips carry (CAM_A_0008, CAM_A_0009, CAM_B_0024 -> A).
+    /// nil when no clip has one, or when two letters tie for first place.
+    static func dominantCameraLetter(in names: [String]) -> Character? {
+        var counts: [Character: Int] = [:]
+        for name in names { if let letter = cameraLetter(in: name) { counts[letter, default: 0] += 1 } }
+        let ranked = counts.sorted { $0.value > $1.value }
+        guard let top = ranked.first else { return nil }
+        if ranked.count > 1 && ranked[1].value == top.value { return nil }
+        return top.key
     }
 
     /// Short camera tag for cards without a reel ID.
@@ -132,12 +165,13 @@ enum CardScan {
 
     // MARK: - Volume names
 
-    /// Keep A-Z 0-9 _ - and fit the file system label limit.
+    /// Keep A-Z 0-9 _ - and single inner spaces ("A CAM"), and fit the file system label limit.
     static func cleanName(_ raw: String, maxLength: Int) -> String {
         var name = String(raw.uppercased().unicodeScalars.filter {
-            ("A"..."Z").contains($0) || ("0"..."9").contains($0) || $0 == "_" || $0 == "-"
+            ("A"..."Z").contains($0) || ("0"..."9").contains($0) || $0 == "_" || $0 == "-" || $0 == " "
         }.map(Character.init))
-        if name.count > maxLength { name.removeAll { $0 == "_" || $0 == "-" } }
+        name = name.split(separator: " ").joined(separator: " ")
+        if name.count > maxLength { name.removeAll { $0 == "_" || $0 == "-" || $0 == " " } }
         return String(name.prefix(maxLength))
     }
 

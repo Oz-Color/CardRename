@@ -5,7 +5,7 @@ import Foundation
 ///   {labroll}C{clip:3}_{date:YYYYMMDD}_{cam}   ->  A001C001_20261102_GOPRO
 ///
 /// Tokens: {labroll}, {clip:digits}, {date:format}, {cam}, {name} (original clip name),
-/// {random:count}. An empty token takes one neighbouring separator with it, so a missing
+/// {random:count}, {letter} (camera letter A, B... found in the clip names). An empty token takes one neighbouring separator with it, so a missing
 /// Cam ID leaves no trailing "_". Anything else is kept as typed.
 struct NameScheme: Codable, Equatable, Sendable {
     enum DateSource: String, Codable, CaseIterable, Sendable { case today, recording }
@@ -16,7 +16,7 @@ struct NameScheme: Codable, Equatable, Sendable {
     static let clipDefault = NameScheme(template: "{labroll}C{clip:3}_{date:YYYYMMDD}_{cam}")
     static let cardDefault = NameScheme(template: "{labroll}_{date:YYYYMMDD}_{cam}")
 
-    static let fields: Set<String> = ["labroll", "clip", "date", "cam", "name", "random"]
+    static let fields: Set<String> = ["labroll", "clip", "date", "cam", "name", "random", "letter"]
     static let dateFormats = ["YYYYMMDD", "YYMMDD", "YYYY-MM-DD", "DDMMYY", "DDMMYYYY", "MMDDYY"]
     static let separators: Set<Character> = ["_", "-", ".", " "]
 
@@ -27,6 +27,7 @@ struct NameScheme: Codable, Equatable, Sendable {
         var cam = ""
         var name = ""
         var random = ""   // drawn once per clip or card, cut to the token's length
+        var letter = ""   // camera letter most clips carry (CAM_A_0008, B003_B012...), cards only
     }
 
     enum Token: Equatable {
@@ -105,6 +106,7 @@ struct NameScheme: Codable, Equatable, Sendable {
         case "cam":     return v.cam.trimmingCharacters(in: .whitespaces)
         case "name":    return v.name
         case "random":  return String(v.random.prefix(min(max(Int(param ?? "") ?? 4, 1), 8)))
+        case "letter":  return v.letter
         default:        return ""
         }
     }

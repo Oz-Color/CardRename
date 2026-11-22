@@ -164,19 +164,22 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
         let maxLength = CardScan.maxLabelLength(fsType: info.fsType)
         let scheme = LabrollStore.shared.cardScheme
         let needsClipDate = scheme.dateSource == .recording && scheme.uses("date")
-        let (isCard, proposal, camera, oldestClip) = await Task.detached {
+        let needsLetter = scheme.uses("letter")
+        let (isCard, proposal, camera, oldestClip, letter) = await Task.detached {
             let proposal = CardScan.analyze(root: volume, maxLength: maxLength)
             var camera = ""
             var oldestClip: Date?
+            var letter = ""
             switch proposal {
             case .reel, .noReel:
                 let files = CardScan.mediaFiles(in: volume)
                 camera = CardScan.cameraTag(root: volume, files: files)
                 if needsClipDate { oldestClip = files.compactMap(Labroll.recordingDate).min() }
+                if needsLetter { letter = CardScan.dominantCameraLetter(in: files.map(\.lastPathComponent)).map(String.init) ?? "" }
             default:
                 break
             }
-            return (proposal == .unreadable || CardScan.looksLikeCard(volume), proposal, camera, oldestClip)
+            return (proposal == .unreadable || CardScan.looksLikeCard(volume), proposal, camera, oldestClip, letter)
         }.value
 
         var name = ""
@@ -186,20 +189,21 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
             // The card scheme with the reel ID as labroll: D902, D902_261103... No camera when only
             // the generic CARD was found (ARRI, RED, Blackmagic cards).
             let values = NameScheme.Values(labroll: reel, date: oldestClip ?? Date(), cam: camera == "CARD" ? "" : camera,
-                                           random: NameScheme.randomCharacters())
+                                           random: NameScheme.randomCharacters(), letter: letter)
             name = scheme.cardName(values, maxLength: maxLength)
         case .noReel(let suggestion):
             // A001_GOPRO: same labroll as the clips will get in the Labroll window.
             // MODEL_YYMMDD only when the next labroll field is empty.
             name = suggestion
             let labroll = LabrollStore.shared.nextLabroll.trimmingCharacters(in: .whitespaces)
-            if !labroll.isEmpty {
+            if !labroll.isEmpty || scheme.uses("letter") {
                 let camID = LabrollStore.shared.camID.trimmingCharacters(in: .whitespaces)
                 let card = (labroll: labroll, camera: camID.isEmpty ? camera : camID)
                 let values = NameScheme.Values(labroll: card.labroll, date: oldestClip ?? Date(), cam: card.camera,
-                                               random: NameScheme.randomCharacters())
+                                               random: NameScheme.randomCharacters(), letter: letter)
                 name = scheme.cardName(values, maxLength: maxLength)
-                labrollCard = card
+                // Only a card named after the labroll takes it from the counter ({letter} CAM doesn't).
+                if scheme.uses("labroll") && !labroll.isEmpty { labrollCard = card }
             }
         default:
             break

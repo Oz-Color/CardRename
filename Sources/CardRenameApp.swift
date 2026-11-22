@@ -375,7 +375,7 @@ struct CardSchemeSettings: View {
         VStack(alignment: .leading, spacing: 4) {
             SchemeEditor(title: "Card names", scheme: $store.cardScheme, standard: .cardDefault,
                          forClips: false, values: store.exampleValues, compact: true,
-                         info: "Every card follows it. With a reel ID, Labroll is the reel (D902_261103); {labroll} alone keeps D902. Labels keep A-Z 0-9 _ -. When too long, YYYY becomes YY, then the date and the camera are left out; random characters stay.")
+                         info: "Every card follows it. With a reel ID, Labroll is the reel (D902_261103); {labroll} alone keeps D902. Labels keep A-Z 0-9 _ - and spaces. When too long, YYYY becomes YY, then the date and the camera are left out; random characters stay.")
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))

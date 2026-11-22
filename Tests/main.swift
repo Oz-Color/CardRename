@@ -59,6 +59,32 @@ check("empty card", "empty", expect: .noClips)
 check("hidden folders skipped", "hidden", expect: .noReel(suggestion: "CANON_260916"))
 check("clips deeper than 5 levels ignored", "deep", expect: .noClips)
 
+// Camera letters: reels from cameras other than C, and the "A CAM" suggestion.
+make("redb/B003_0916AB.RDM/B003_B012_0916AB.RDC/B003_B012_0916AB_001.R3D")
+make("alexa35/A_0001R1AB/A_0001C001_260916_R1AB.mxf")
+check("RED reel from B camera", "redb", expect: .reel("B003"))
+check("ARRI Alexa 35 reel", "alexa35", expect: .reel("A_0001"))
+let letterCases: [(String, Character?)] = [
+    ("A001C001_260916JN.MXF", "A"), ("D902C001_260916JN.MXF", "D"), ("B003_B012_0916AB_001.R3D", "B"),
+    ("C007_09161234_C001.braw", "C"), ("A_0001C001_260916_R1AB.mxf", "A"), ("E003C0001_261031_P5M025.MOV", "E"),
+    ("A_CAM_0001.MP4", "A"), ("BCAM0001.MOV", "B"), ("CAM_C_0001.MOV", "C"), ("clip_D-CAM.mov", "D"),
+    ("Camera-F 0003.mov", "F"),
+    ("C0001.MP4", nil), ("GX010001.MP4", nil), ("DJI_0001.MP4", nil), ("MVI_0001.MOV", nil), ("P1000001.MOV", nil),
+    ("DJI_20260914101010_0001_D.MP4", nil), ("XDCAM_0001.MXF", nil), ("WEBCAM_01.MOV", nil),
+]
+for (name, letter) in letterCases { expectTrue("camera letter \(name) -> \(letter.map(String.init) ?? "none")", CardScan.cameraLetter(in: name) == letter) }
+for name in ["CAM_A_0008.MP4", "CAM_B_0024.MP4", "CAM_C_0037.MXF", "CAM_A_0008S03.MP4"] {
+    expectTrue("Sony camera index \(name)", CardScan.cameraLetter(in: name) == name.dropFirst(4).first)
+}
+expectTrue("dominant letter wins", CardScan.dominantCameraLetter(in: ["CAM_A_0008.MP4", "CAM_A_0009.MP4", "CAM_B_0024.MP4", "GX010001.MP4"]) == "A")
+expectTrue("tied letters: none", CardScan.dominantCameraLetter(in: ["CAM_A_0008.MP4", "CAM_B_0024.MP4"]) == nil)
+expectTrue("no letter: none", CardScan.dominantCameraLetter(in: ["C0001.MP4", "GX010001.MP4"]) == nil)
+expectTrue("several reels, one camera", CardScan.dominantCameraLetter(in: ["A001C001_x.MXF", "A002C001_x.MXF", "x.XML"]) == "A")
+expectEqual("scheme: {letter} CAM on exFAT", NameScheme(template: "{letter} CAM").cardName(.init(letter: "A"), maxLength: 11), "A CAM")
+expectEqual("scheme: {letter} CAM, no letter", NameScheme(template: "{letter} CAM").cardName(.init(), maxLength: 11), "CAM")
+expectEqual("scheme: reel and letter", NameScheme(template: "{labroll}_{letter}").cardName(.init(labroll: "D902", letter: "D"), maxLength: 11), "D902_D")
+expectTrue("spaces squeezed", CardScan.cleanName("  b   cam ", maxLength: 11) == "B CAM")
+
 let defaults = ["UNTITLED", " NO NAME", "NONAME", "DJI "]
 for name in ["UNTITLED", "Untitled 2", "NO NAME", "NO NAME 1", "DJI", "DJI 1", "DJI2", "NONAME12"] {
     expectTrue("default name \(name)", CardScan.isDefaultName(name, defaults: defaults))
@@ -218,6 +244,8 @@ expectTrue("rename never overwrites", (try? Labroll.renameInPlace(renamed!, to: 
 expectTrue("1.10 is newer than 1.9", Updater.isNewer("1.10", than: "1.9"))
 expectTrue("1.7.1 is newer than 1.7", Updater.isNewer("1.7.1", than: "1.7"))
 expectTrue("1.7 is not newer than 1.7.0", !Updater.isNewer("1.7", than: "1.7.0"))
+expectTrue("1.10 is not newer than local 1.10b", !Updater.isNewer("1.10", than: "1.10b"))
+expectTrue("1.11 is newer than local 1.10b", Updater.isNewer("1.11", than: "1.10b"))
 expectTrue("1.6 is not newer than 1.7", !Updater.isNewer("1.6", than: "1.7"))
 let releaseJSON = #"{"tag_name":"v1.8","html_url":"https://github.com/x/y/releases/tag/v1.8","assets":[{"name":"notes.txt","browser_download_url":"https://e/notes.txt"},{"name":"CardRename.dmg","browser_download_url":"https://e/CardRename.dmg"}]}"#
 expectEqual("release: version without v, DMG link", Updater.parse(Data(releaseJSON.utf8)),

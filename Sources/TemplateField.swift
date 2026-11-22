@@ -35,6 +35,7 @@ final class TemplatePiece: NSObject {
         case "cam":     return "Cam ID"
         case "name":    return "Name"
         case "random":  return "Random \(param ?? "4")"
+        case "letter":  return "Cam letter"
         default:        return raw
         }
     }
@@ -214,6 +215,7 @@ struct SchemeEditor: View {
                 chip("Cam ID", "{cam}")
                 if forClips { chip("Original name", "{name}") }
                 chip("Random", "{random:4}")
+                if !forClips { chip("Letter", "{letter}").help("Camera letter most clips carry (CAM_A_0008, A001C001, B003_B012…): {letter} CAM gives A CAM") }
             }
             .controlSize(.small)
             if compact { dateSource }
@@ -252,7 +254,7 @@ struct SchemeEditor: View {
             return "GX010001.MP4  →  " + scheme.clipName(values, extension: "MP4")
         }
         var reel = values
-        (reel.labroll, reel.cam) = ("D902", "")
+        (reel.labroll, reel.cam, reel.letter) = ("D902", "", "D")
         return "FAT32, exFAT  " + scheme.cardName(values, maxLength: 11)
             + "\nAPFS         " + scheme.cardName(values, maxLength: 27)
             + "\nReel D902    " + scheme.cardName(reel, maxLength: 11)
@@ -279,6 +281,6 @@ extension LabrollStore {
     var exampleValues: NameScheme.Values {
         let cam = camID.trimmingCharacters(in: .whitespaces)
         return .init(labroll: nextLabroll, clip: 1, date: Date(), cam: cam.isEmpty ? "GOPRO" : cam,
-                     name: "GX010001", random: "X7K2R9P4")
+                     name: "GX010001", random: "X7K2R9P4", letter: "A")
     }
 }

@@ -81,8 +81,9 @@ final class Updater: ObservableObject {
 
     /// Compares numerically: 1.10 is newer than 1.9.
     nonisolated static func isNewer(_ version: String, than other: String) -> Bool {
-        let a = version.split(separator: ".").map { Int($0) ?? 0 }
-        let b = other.split(separator: ".").map { Int($0) ?? 0 }
+        // Leading digits of each part: a local build 1.10b counts as 1.10.
+        func parts(_ v: String) -> [Int] { v.split(separator: ".").map { Int($0.prefix(while: \.isNumber)) ?? 0 } }
+        let a = parts(version), b = parts(other)
         for i in 0..<max(a.count, b.count) {
             let x = i < a.count ? a[i] : 0, y = i < b.count ? b[i] : 0
             if x != y { return x > y }
