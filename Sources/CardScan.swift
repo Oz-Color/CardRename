@@ -122,6 +122,65 @@ enum CardScan {
         return top.key
     }
 
+    // MARK: - Clip and reel numbers, gaps
+
+    private static let clipNumberPatterns = [
+        try! Regex("^[A-Z][0-9]{3}C([0-9]{3,4})"),                    // A001C003
+        try! Regex("^[A-Z]_[0-9]{4}C([0-9]{3})"),                     // A_0001C003 (Alexa 35)
+        try! Regex("^[A-Z][0-9]{3}_[A-Z]([0-9]{3})_"),                // B003_B012 (RED)
+        try! Regex("^[A-Z][0-9]{3}_[0-9]{8}_C([0-9]{3})"),            // A007_09161234_C003 (Blackmagic)
+        try! Regex("(?:^|[^A-Z0-9])CAM(?:ERA)?[ _-]?[A-Z][ _-]?([0-9]{2,})"),  // CAM_E_0013 (Sony)
+        try! Regex("(?:^|[^A-Z0-9])[A-Z][ _-]?CAM[ _-]?([0-9]{2,})"),          // A_CAM_0013
+    ]
+
+    /// Clip number of one clip name: 3 in A001C003, 13 in CAM_E_0013. nil when none.
+    static func clipNumber(in name: String) -> Int? {
+        let stem = (name as NSString).deletingPathExtension.uppercased()
+        for pattern in clipNumberPatterns {
+            if let match = try? pattern.firstMatch(in: stem), let digits = match.output[1].substring { return Int(digits) }
+        }
+        return nil
+    }
+
+    /// Clip numbers of the clips of camera `letter` (proxies and spanned files counted once).
+    static func clipNumbers(in names: [String], letter: String) -> [Int] {
+        Set(names.filter { cameraLetter(in: $0).map(String.init) == letter }.compactMap(clipNumber(in:))).sorted()
+    }
+
+    /// Camera letter and number of a reel ID: A005 -> (A, 5), A_0001 -> (A, 1).
+    static func reelNumber(_ reel: String) -> (letter: String, number: Int)? {
+        guard let match = try? Regex("^([A-Z])_?([0-9]+)$").wholeMatch(in: reel.uppercased()),
+              let letter = match.output[1].substring, let digits = match.output[2].substring,
+              let number = Int(digits) else { return nil }
+        return (String(letter), number)
+    }
+
+    /// What looks missing from camera `letter`:
+    /// - `reel` beyond `nextReel` (the reel expected after the last card of that camera);
+    /// - clip numbers skipped on the card;
+    /// - without a reel (CAM_E_0013, numbered across cards), a first clip beyond `lastClip` + 1.
+    static func gaps(letter: String, reel: Int?, nextReel: Int?, clips: [Int], lastClip: Int?) -> [String] {
+        func span(_ from: Int, _ to: Int, _ format: (Int) -> String) -> String {
+            from == to ? format(from) : "\(format(from)) to \(format(to))"
+        }
+        let reelName = { (n: Int) in letter + String(format: "%03d", n) }
+        let clipName = { (n: Int) in String(format: "%03d", n) }
+        var result: [String] = []
+        if let reel, let nextReel, reel > nextReel {
+            result.append("Reel\(reel - 1 > nextReel ? "s" : "") \(span(nextReel, reel - 1, reelName)) missing: the last card of camera \(letter) was \(reelName(nextReel - 1)), this one is \(reelName(reel)).")
+        }
+        if reel == nil, let lastClip, let first = clips.first, first > lastClip + 1 {
+            result.append("Clip\(first - 1 > lastClip + 1 ? "s" : "") \(span(lastClip + 1, first - 1, clipName)) missing: the last card of camera \(letter) ended at clip \(clipName(lastClip)), this one starts at \(clipName(first)).")
+        }
+        var missing: [String] = []
+        for (a, b) in zip(clips, clips.dropFirst()) where b > a + 1 { missing.append(span(a + 1, b - 1, clipName)) }
+        if !missing.isEmpty {
+            let shown = missing.prefix(5).joined(separator: ", ") + (missing.count > 5 ? "…" : "")
+            result.append("Clip\(missing.count == 1 && !missing[0].contains(" to ") ? "" : "s") \(shown) missing on this card.")
+        }
+        return result
+    }
+
     /// Short camera tag for cards without a reel ID.
     static func cameraTag(root: URL, files: [URL]) -> String {
         let fm = FileManager.default
@@ -195,12 +254,12 @@ enum CardScan {
         return (try? pattern.wholeMatch(in: name.uppercased())) != nil
     }
 
-    /// Card folders, or reel-named clips near the root (RED, ARRI, Blackmagic, Ronin).
+    /// Card folders, or reel-named or camera-lettered clips near the root (RED, ARRI, Blackmagic, Ronin, CAM_E_0013).
     static func looksLikeCard(_ root: URL) -> Bool {
         let fm = FileManager.default
         if cardFolders.contains(where: { fm.fileExists(atPath: root.appendingPathComponent($0).path) }) { return true }
         let names = mediaFiles(in: root, maxDepth: 3, limit: 50).map(\.lastPathComponent)
-        return !reelIDs(in: names).isEmpty
+        return !reelIDs(in: names).isEmpty || names.contains { cameraLetter(in: $0) != nil }   // or CAM_E_0013.MXF
     }
 }
 

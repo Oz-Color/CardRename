@@ -29,20 +29,30 @@ final class TemplatePiece: NSObject {
     var label: String {
         guard let (name, param) = token else { return raw }
         switch name {
-        case "labroll": return "Labroll"
+        case "labroll": return "Reel ID" + Self.cutLabel(param)
         case "clip":    return "Clip " + String(format: "%0\(Int(param ?? "") ?? 3)d", 1)
         case "date":    return param ?? "YYYYMMDD"
-        case "cam":     return "Cam ID"
-        case "name":    return "Name"
+        case "cam":     return "Cam ID" + Self.cutLabel(param)
+        case "name":    return "Name" + Self.cutLabel(param)
         case "random":  return "Random \(param ?? "4")"
-        case "letter":  return "Cam letter"
+        case "letter":  return "Camera letter"
         default:        return raw
         }
+    }
+
+    /// ", first 3" for {cam:3}, ", last 3" for {cam:-3}.
+    static func cutLabel(_ param: String?) -> String {
+        guard let count = param.flatMap({ Int($0) }), count != 0 else { return "" }
+        return count > 0 ? ", first \(count)" : ", last \(-count)"
     }
 
     /// Other forms of the token, offered in its menu.
     var choices: [(title: String, raw: String)] {
         switch token?.name {
+        case let name? where ["cam", "name", "labroll"].contains(name):
+            return [("All characters", "{\(name)}")]
+                + (1...6).map { ("First \($0) character\($0 == 1 ? "" : "s")", "{\(name):\($0)}") }
+                + (1...6).map { ("Last \($0) character\($0 == 1 ? "" : "s")", "{\(name):-\($0)}") }
         case "clip":
             return (2...4).map { ("\($0) digits   \(String(format: "%0\($0)d", 1))", "{clip:\($0)}") }
         case "date":
@@ -56,7 +66,7 @@ final class TemplatePiece: NSObject {
 }
 
 /// Name template edited as tokens and text (NSTokenField): tokens dragged in from the chips or moved
-/// inside the name, a click on Clip, Date or Random opens its format menu, text typed between tokens.
+/// inside the name, a click on a token with an arrow opens its format menu, text typed between tokens.
 struct TemplateField: NSViewRepresentable {
     @Binding var template: String
 
@@ -67,14 +77,22 @@ struct TemplateField: NSViewRepresentable {
         field.delegate = context.coordinator
         field.tokenizingCharacterSet = CharacterSet(charactersIn: "\u{1F}")   // never typed: text stays text
         field.font = .systemFont(ofSize: NSFont.smallSystemFontSize + 1)
-        field.cell?.wraps = false          // a token field draws one line only; longer names scroll
-        field.cell?.isScrollable = true
+        // Long names wrap onto more lines (sizeThatFits), so the whole name stays visible.
+        field.cell?.wraps = true
+        field.cell?.isScrollable = false
         field.placeholderString = "Drag tokens here"
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         field.objectValue = TemplatePiece.pieces(template)
         context.coordinator.field = field
         return field
+    }
+
+    /// Height of the wrapped tokens at the offered width.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView field: NSTokenField, context: Context) -> CGSize? {
+        let width = proposal.width ?? 300
+        let height = field.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: 1000)).height ?? 22
+        return CGSize(width: width, height: max(22, height.rounded(.up)))
     }
 
     /// Only a change made outside the field (chip, Reset) is written back into it, after the current
@@ -200,22 +218,27 @@ struct SchemeEditor: View {
             HStack(spacing: 4) {
                 Text(title).bold()
                 InfoButton(info + (info.isEmpty ? "" : "\n\n")
-                    + "Drag a token into the name or click it to add it at the end. Drag tokens to move them; the arrow on Clip, date and Random tokens changes their format.")
+                    + "Drag a token into the name or click it to add it at the end. Drag tokens to move them; the arrow on a token changes its format: Clip digits, date format, Random length, or only the first or last characters of Reel ID, Cam ID and Name.")
                 Spacer()
                 if !compact { dateSource }
                 Button("Reset") { scheme = standard }
                     .disabled(scheme == standard)
             }
             TemplateField(template: $scheme.template)
-                .frame(height: 24)
-            HStack(spacing: 6) {
-                chip("Labroll", "{labroll}")
-                if forClips { chip("Clip #", "{clip:3}") }
-                chip("Date", "{date:YYYYMMDD}")
-                chip("Cam ID", "{cam}")
-                if forClips { chip("Original name", "{name}") }
-                chip("Random", "{random:4}")
-                if !forClips { chip("Letter", "{letter}").help("Camera letter most clips carry (CAM_A_0008, A001C001, B003_B012…): {letter} CAM gives A CAM") }
+            // Narrow panel: the card chips on two rows, so Camera letter isn't cut off.
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    chip("Reel ID", "{labroll}")
+                    if forClips { chip("Clip #", "{clip:3}") }
+                    chip("Date", "{date:YYYYMMDD}")
+                    chip("Cam ID", "{cam}")
+                    if forClips { chip("Original name", "{name}") }
+                    chip("Random", "{random:4}")
+                }
+                if !forClips {
+                    chip("Camera letter", "{letter}")
+                        .help("Camera letter most clips carry (CAM_A_0008, A001C001, B003_B012…): {letter} CAM gives A CAM")
+                }
             }
             .controlSize(.small)
             if compact { dateSource }

@@ -12,6 +12,7 @@ final class Updater: ObservableObject {
     struct Release: Equatable {
         let version: String
         let download: URL
+        var notes = ""   // the release's description (Markdown), shown as its changelog
     }
 
     @Published private(set) var available: Release?
@@ -24,6 +25,13 @@ final class Updater: ObservableObject {
     private var current: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0" }
 
     func start() {
+        // First launch of a newer version (installed by an update or by hand): its changelog.
+        let last = UserDefaults.standard.string(forKey: "lastRunVersion")
+        UserDefaults.standard.set(current, forKey: "lastRunVersion")
+        if let last, Self.isNewer(current, than: last) {
+            let version = current
+            Task { if let notes = await Self.notes(for: version) { Changelog.show(version: version, notes: notes) } }
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 24 * 3600, repeats: true) { _ in
             Task { @MainActor in await Updater.shared.check() }
         }
@@ -45,6 +53,21 @@ final class Updater: ObservableObject {
               let release = Self.parse(data) else { return }
         available = Self.isNewer(release.version, than: current) ? release : nil
         if let available { notifyOnce(available) }
+    }
+
+    /// Description of release `version` (tag v1.11, or 1.11).
+    static func notes(for version: String) async -> String? {
+        let releases = latestRelease.deletingLastPathComponent().appendingPathComponent("tags")
+        for tag in ["v\(version)", version] {
+            var request = URLRequest(url: releases.appendingPathComponent(tag))
+            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+            request.setValue("CardRename", forHTTPHeaderField: "User-Agent")
+            if let (data, response) = try? await URLSession.shared.data(for: request),
+               (response as? HTTPURLResponse)?.statusCode == 200, let release = parse(data) {
+                return release.notes
+            }
+        }
+        return nil
     }
 
     /// The browser downloads the DMG, so macOS checks the notarized app when it is first opened.
@@ -76,7 +99,8 @@ final class Updater: ObservableObject {
         let assets = json["assets"] as? [[String: Any]] ?? []
         let dmg = assets.first { ($0["name"] as? String)?.hasSuffix(".dmg") == true }?["browser_download_url"] as? String
         guard let link = dmg ?? json["html_url"] as? String, let url = URL(string: link) else { return nil }
-        return Release(version: tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV")), download: url)
+        return Release(version: tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV")), download: url,
+                       notes: json["body"] as? String ?? "")
     }
 
     /// Compares numerically: 1.10 is newer than 1.9.

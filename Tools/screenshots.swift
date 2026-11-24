@@ -29,6 +29,7 @@ struct Screenshots {
             clip("GX010002.MP4", 3.9, .working), clip("GX010003.MP4", 1.4, .waiting),
         ])]
 
+        LabrollStore.shared.cameraReels = ["A": 4, "B": 12, "E": 4]
         shot("panel", PanelView(engine: engine), in: folder)
         shot("panel-dark", PanelView(engine: engine), dark: true, in: folder)
         engine.settingsOpen = true
@@ -36,6 +37,8 @@ struct Screenshots {
         engine.settingsOpen = false
         shot("labroll", LabrollView(store: .shared).frame(width: 680, height: 470), in: folder)
         shot("about", AboutView(), in: folder)
+        shot("gap", GapWarningView(card: "UNTITLED", letter: "E", lines: CardScan.gaps(
+            letter: "E", reel: nil, nextReel: nil, clips: [13, 14, 16], lastClip: 10)) {}, in: folder)
     }
 
     @MainActor static func shot<V: View>(_ name: String, _ view: V, dark: Bool = false, in folder: String) {

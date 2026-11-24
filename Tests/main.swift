@@ -85,6 +85,31 @@ expectEqual("scheme: {letter} CAM, no letter", NameScheme(template: "{letter} CA
 expectEqual("scheme: reel and letter", NameScheme(template: "{labroll}_{letter}").cardName(.init(labroll: "D902", letter: "D"), maxLength: 11), "D902_D")
 expectTrue("spaces squeezed", CardScan.cleanName("  b   cam ", maxLength: 11) == "B CAM")
 
+// Sony Venice style camera index on an XDROOT card, and clip numbers per camera.
+make("venice/XDROOT/Clip/CAM_E_0013.MXF")
+make("venice/XDROOT/Clip/CAM_E_0014.MXF")
+make("venice/XDROOT/Clip/CAM_E_0016.MXF")
+let veniceNames = CardScan.mediaFiles(in: base.appendingPathComponent("venice")).map(\.lastPathComponent)
+make("loose/CAM_E_0013.MXF")
+expectTrue("CAM_E_0013.MXF at the root: a card", CardScan.looksLikeCard(base.appendingPathComponent("loose")))
+expectTrue("CAM_E_0013.MXF: camera E", CardScan.dominantCameraLetter(in: veniceNames) == "E")
+expectEqual("clip numbers of camera E", CardScan.clipNumbers(in: veniceNames, letter: "E"), [13, 14, 16])
+expectEqual("clip numbers by name", ["A001C003_x.MXF", "A_0001C012_x.mxf", "B003_B012_0916AB_001.R3D",
+                                     "A007_09161234_C004.braw", "CAM_E_0013S03.MP4", "A_CAM_0021.MOV", "GX010001.MP4"].map(CardScan.clipNumber(in:)),
+            [3, 12, 12, 4, 13, 21, nil])
+expectTrue("reel number", CardScan.reelNumber("A005")! == ("A", 5) && CardScan.reelNumber("A_0001")! == ("A", 1) && CardScan.reelNumber("GOPRO") == nil)
+expectEqual("gaps: none", CardScan.gaps(letter: "A", reel: 4, nextReel: 4, clips: [1, 2, 3], lastClip: nil), [])
+expectEqual("gaps: first card of a camera", CardScan.gaps(letter: "A", reel: 7, nextReel: nil, clips: [1, 2], lastClip: nil), [])
+expectEqual("gaps: reel skipped", CardScan.gaps(letter: "A", reel: 5, nextReel: 4, clips: [], lastClip: nil),
+            ["Reel A004 missing: the last card of camera A was A003, this one is A005."])
+expectEqual("gaps: clips skipped on the card", CardScan.gaps(letter: "E", reel: nil, nextReel: nil, clips: [13, 14, 16, 20], lastClip: 12),
+            ["Clips 015, 017 to 019 missing on this card."])
+expectEqual("gaps: clips skipped since the last card", CardScan.gaps(letter: "E", reel: nil, nextReel: nil, clips: [13], lastClip: 10),
+            ["Clips 011 to 012 missing: the last card of camera E ended at clip 010, this one starts at 013."])
+expectEqual("gaps: reel cards restart their clips", CardScan.gaps(letter: "A", reel: 4, nextReel: 4, clips: [1, 2], lastClip: 30), [])
+expectEqual("token: first and last characters", ["{cam:3}", "{cam:-3}", "{cam}", "{name:-4}"].map {
+    NameScheme(template: $0).render(.init(cam: "GOPRO", name: "GX010001")) }, ["GOP", "PRO", "GOPRO", "0001"])
+
 let defaults = ["UNTITLED", " NO NAME", "NONAME", "DJI "]
 for name in ["UNTITLED", "Untitled 2", "NO NAME", "NO NAME 1", "DJI", "DJI 1", "DJI2", "NONAME12"] {
     expectTrue("default name \(name)", CardScan.isDefaultName(name, defaults: defaults))
@@ -252,6 +277,7 @@ expectEqual("release: version without v, DMG link", Updater.parse(Data(releaseJS
             Updater.Release(version: "1.8", download: URL(string: "https://e/CardRename.dmg")!))
 expectEqual("release without DMG: its page", Updater.parse(Data(#"{"tag_name":"1.9","html_url":"https://p"}"#.utf8))?.download,
             URL(string: "https://p"))
+expectEqual("release notes", Updater.parse(Data(#"{"tag_name":"v1.11","html_url":"https://p","body":"**New**"}"#.utf8))?.notes, "**New**")
 expectTrue("not a release: nil", Updater.parse(Data(#"{"message":"Not Found"}"#.utf8)) == nil)
 
 try? fm.removeItem(at: base)

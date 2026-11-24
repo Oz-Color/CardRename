@@ -5,7 +5,7 @@ import Foundation
 ///   {labroll}C{clip:3}_{date:YYYYMMDD}_{cam}   ->  A001C001_20261102_GOPRO
 ///
 /// Tokens: {labroll}, {clip:digits}, {date:format}, {cam}, {name} (original clip name),
-/// {random:count}, {letter} (camera letter A, B... found in the clip names). An empty token takes one neighbouring separator with it, so a missing
+/// {random:count}, {cam:3} / {cam:-3} (first or last characters, also {name} and {labroll}), {letter} (camera letter A, B... found in the clip names). An empty token takes one neighbouring separator with it, so a missing
 /// Cam ID leaves no trailing "_". Anything else is kept as typed.
 struct NameScheme: Codable, Equatable, Sendable {
     enum DateSource: String, Codable, CaseIterable, Sendable { case today, recording }
@@ -100,15 +100,21 @@ struct NameScheme: Codable, Equatable, Sendable {
 
     private static func value(_ name: String, _ param: String?, _ v: Values, shortDates: Bool) -> String {
         switch name {
-        case "labroll": return v.labroll.trimmingCharacters(in: .whitespaces)
+        case "labroll": return cut(v.labroll.trimmingCharacters(in: .whitespaces), param)
         case "clip":    return String(format: "%0\(min(max(Int(param ?? "") ?? 3, 1), 6))d", v.clip)
         case "date":    return date(v.date, format: param ?? "YYYYMMDD", short: shortDates)
-        case "cam":     return v.cam.trimmingCharacters(in: .whitespaces)
-        case "name":    return v.name
+        case "cam":     return cut(v.cam.trimmingCharacters(in: .whitespaces), param)
+        case "name":    return cut(v.name, param)
         case "random":  return String(v.random.prefix(min(max(Int(param ?? "") ?? 4, 1), 8)))
         case "letter":  return v.letter
         default:        return ""
         }
+    }
+
+    /// {cam:3}: first 3 characters, {cam:-3}: last 3, {cam}: all.
+    static func cut(_ text: String, _ param: String?) -> String {
+        guard let count = param.flatMap({ Int($0) }), count != 0 else { return text }
+        return String(count > 0 ? text.prefix(count) : text.suffix(-count))
     }
 
     /// YYYYMMDD style format (as shown in the menu) applied to a date.

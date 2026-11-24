@@ -35,6 +35,8 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
     @Published var ejectAfterRename: Bool { didSet { store.set(ejectAfterRename, forKey: "ejectAfterRename") } }
     /// Cards without reel ID: once renamed (or inserted again after the eject), offer to rename their clips.
     @Published var offerClipRename: Bool { didSet { store.set(offerClipRename, forKey: "offerClipRename") } }
+    /// Warn when a reel or clips of a camera look missing (CardScan.gaps).
+    @Published var warnGaps: Bool { didSet { store.set(warnGaps, forKey: "warnGaps") } }
     @Published var recentOpen: Bool { didSet { store.set(recentOpen, forKey: "recentOpen") } }
     /// Panel rows of the default-named cards: suggested name (same one the rename uses), or what stops it.
     @Published private(set) var suggestedNames: [String: String] = [:]
@@ -75,11 +77,13 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
         ejectAfterRename = store.object(forKey: "ejectAfterRename") as? Bool ?? false
         offerClipRename = store.object(forKey: "offerClipRename") as? Bool ?? true
         recentOpen = store.object(forKey: "recentOpen") as? Bool ?? true
+        warnGaps = store.object(forKey: "warnGaps") as? Bool ?? true
         super.init()
         // A new scheme, next labroll or Cam ID changes the suggested names.
         let labroll = LabrollStore.shared
-        labroll.$cardScheme.map { _ in () }.merge(with: labroll.$nextLabroll.map { _ in () }, labroll.$camID.map { _ in () })
-            .dropFirst(3)
+        labroll.$cardScheme.map { _ in () }.merge(with: labroll.$nextLabroll.map { _ in () }, labroll.$camID.map { _ in () },
+                                                  labroll.$cameraReels.map { _ in () })
+            .dropFirst(4)
             .debounce(for: .milliseconds(400), scheduler: RunLoop.main)
             .sink { [weak self] in self?.refreshPreviews(again: true) }
             .store(in: &watchers)
@@ -157,6 +161,8 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
         let isCard: Bool
         let name: String   // reel or labroll name from the card scheme, "" when nothing to rename
         let labrollCard: (labroll: String, camera: String)?   // card without reel ID named after its labroll
+        var letter = ""      // camera letter most clips carry, "" when none
+        var clips: [Int] = []   // clip numbers of that camera on the card
     }
 
     private func plan(_ volume: URL) async -> Plan? {
@@ -164,22 +170,24 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
         let maxLength = CardScan.maxLabelLength(fsType: info.fsType)
         let scheme = LabrollStore.shared.cardScheme
         let needsClipDate = scheme.dateSource == .recording && scheme.uses("date")
-        let needsLetter = scheme.uses("letter")
-        let (isCard, proposal, camera, oldestClip, letter) = await Task.detached {
+        let (isCard, proposal, camera, oldestClip, letter, clips) = await Task.detached {
             let proposal = CardScan.analyze(root: volume, maxLength: maxLength)
             var camera = ""
             var oldestClip: Date?
             var letter = ""
+            var clips: [Int] = []
             switch proposal {
             case .reel, .noReel:
                 let files = CardScan.mediaFiles(in: volume)
                 camera = CardScan.cameraTag(root: volume, files: files)
                 if needsClipDate { oldestClip = files.compactMap(Labroll.recordingDate).min() }
-                if needsLetter { letter = CardScan.dominantCameraLetter(in: files.map(\.lastPathComponent)).map(String.init) ?? "" }
+                let names = files.map(\.lastPathComponent)
+                letter = CardScan.dominantCameraLetter(in: names).map(String.init) ?? ""
+                clips = CardScan.clipNumbers(in: names, letter: letter)
             default:
                 break
             }
-            return (proposal == .unreadable || CardScan.looksLikeCard(volume), proposal, camera, oldestClip, letter)
+            return (proposal == .unreadable || CardScan.looksLikeCard(volume), proposal, camera, oldestClip, letter, clips)
         }.value
 
         var name = ""
@@ -192,10 +200,12 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
                                            random: NameScheme.randomCharacters(), letter: letter)
             name = scheme.cardName(values, maxLength: maxLength)
         case .noReel(let suggestion):
-            // A001_GOPRO: same labroll as the clips will get in the Labroll window.
+            // A001_GOPRO: same labroll as the clips will get in the Labroll window. Clips carrying a
+            // camera letter (CAM_E_0013: camera E, clip 13) take camera E's next reel (E004) instead of the next labroll.
             // MODEL_YYMMDD only when the next labroll field is empty.
             name = suggestion
-            let labroll = LabrollStore.shared.nextLabroll.trimmingCharacters(in: .whitespaces)
+            let labroll = letter.isEmpty ? LabrollStore.shared.nextLabroll.trimmingCharacters(in: .whitespaces)
+                : LabrollStore.shared.nextReel(for: letter)
             if !labroll.isEmpty || scheme.uses("letter") {
                 let camID = LabrollStore.shared.camID.trimmingCharacters(in: .whitespaces)
                 let card = (labroll: labroll, camera: camID.isEmpty ? camera : camID)
@@ -208,7 +218,8 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
         default:
             break
         }
-        return Plan(info: info, maxLength: maxLength, proposal: proposal, isCard: isCard, name: name, labrollCard: labrollCard)
+        return Plan(info: info, maxLength: maxLength, proposal: proposal, isCard: isCard, name: name, labrollCard: labrollCard,
+                    letter: letter, clips: clips)
     }
 
     /// `auto`: started by a mount, stay silent unless a card is renamed or something is wrong.
@@ -234,6 +245,18 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
         let labrollCard = plan.labrollCard
 
         if auto && !plan.isCard { return }   // a USB stick or a disk image, not a camera card
+
+        // Reel and clips of the card's camera, against the last card of that camera.
+        var reel: (letter: String, number: Int)?
+        if case .reel(let id) = plan.proposal { reel = CardScan.reelNumber(id) }
+        let gapLetter = reel?.letter ?? plan.letter
+        if warnGaps, !gapLetter.isEmpty {
+            let lines = CardScan.gaps(letter: gapLetter, reel: reel?.number,
+                                      nextReel: LabrollStore.shared.cameraReels[gapLetter],
+                                      clips: gapLetter == plan.letter ? plan.clips : [],
+                                      lastClip: LabrollStore.shared.cameraClips[gapLetter])
+            if !lines.isEmpty { GapWarning.show(card: current, letter: gapLetter, lines: lines) }
+        }
 
         var newName: String
         switch plan.proposal {
@@ -282,10 +305,21 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
         recent.insert(entry, at: 0)
         appendLog(entry, undo: false)
 
+        // The camera's counters go on from this card: next reel, last clip.
+        let labrolls = LabrollStore.shared
+        if let reel { labrolls.reelUsed(reel.letter, reel.number) }
+        if reel == nil, !plan.letter.isEmpty, let last = plan.clips.last {
+            labrolls.cameraClips[plan.letter] = max(labrolls.cameraClips[plan.letter] ?? 0, last)
+        }
+
         if var card = labrollCard {
             // Name edited in the dialog (B004_X7K2): its labroll is used, and the counter goes on from it.
             if !newName.hasPrefix(card.labroll), let typed = Labroll.leading(newName) { card.labroll = typed.uppercased() }
-            LabrollStore.shared.consume(card.labroll, suggested: labrollCard?.labroll)
+            if !plan.letter.isEmpty, let used = CardScan.reelNumber(card.labroll) {
+                labrolls.reelUsed(used.letter, used.number)   // E004 -> camera E's next reel is E005
+            } else {
+                labrolls.consume(card.labroll, suggested: labrollCard?.labroll)
+            }
             rememberLabrollCard(uuid, labroll: card.labroll, camera: card.camera, waitingForMount: ejectAfterRename)
             if !ejectAfterRename {
                 offerLabroll(URL(fileURLWithPath: "/Volumes/\(newName)"), labroll: card.labroll, camera: card.camera)
@@ -328,8 +362,8 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
         guard offerClipRename else { return }
         let alert = NSAlert()
         alert.messageText = "Rename the clips of \(volume.lastPathComponent)?"
-        alert.informativeText = "Its clips have no reel ID. The Labroll window lists them as \(labroll)C001, \(labroll)C002…, before and after; nothing is copied or renamed until you click there."
-        alert.addButton(withTitle: "Open Labroll")
+        alert.informativeText = "Its clips have no reel ID. The Clip renamer lists them as \(labroll)C001, \(labroll)C002…, before and after; nothing is copied or renamed until you click there."
+        alert.addButton(withTitle: "Open Clip Renamer")
         alert.addButton(withTitle: "Not Now")
         NSApp.activate(ignoringOtherApps: true)
         if alert.runModal() == .alertFirstButtonReturn { sendToLabroll(volume, labroll: labroll, camera: camera) }
@@ -471,6 +505,12 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
         return format
     }()
 
+    /// Recent renames emptied; the log keeps them, they are just not listed again.
+    func clearRecent() {
+        recent = []
+        store.set(Date(), forKey: "recentClearedAt")
+    }
+
     private func loadLog() {
         guard let text = try? String(contentsOf: logURL, encoding: .utf8) else { return }
         var entries: [RenameEntry] = []
@@ -487,7 +527,8 @@ final class Engine: NSObject, ObservableObject, UNUserNotificationCenterDelegate
                 entries.append(RenameEntry(date: date, old: f[1], new: f[2], uuid: uuid))
             }
         }
-        recent = Array(entries.suffix(20).reversed())
+        let cleared = store.object(forKey: "recentClearedAt") as? Date ?? .distantPast
+        recent = Array(entries.filter { $0.date > cleared }.suffix(20).reversed())
     }
 
     private func appendLog(_ entry: RenameEntry, undo: Bool) {

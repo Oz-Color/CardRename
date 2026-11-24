@@ -46,6 +46,11 @@ final class LabrollStore: ObservableObject {
 
     @Published var nextLabroll: String { didSet { store.set(nextLabroll, forKey: "labrollNext") } }
     @Published var camID: String { didSet { store.set(camID, forKey: "labrollCamID") } }
+    /// Next reel number per camera letter (A: 3 -> A003), for cards without reel ID whose clips carry a letter.
+    @Published var cameraReels: [String: Int] { didSet { store.set(cameraReels, forKey: "cameraReels") } }
+    /// Last clip number seen per camera letter (CAM_E_0013 numbering, which goes on across cards): gap check.
+    @Published var cameraClips: [String: Int] { didSet { store.set(cameraClips, forKey: "cameraClips") } }
+    @Published var newCameraLetter = ""   // Settings field for adding a camera
     @Published var destination: String { didSet { store.set(destination, forKey: "labrollDestination") } }
     @Published var renameOnly: Bool { didSet { store.set(renameOnly, forKey: "labrollRenameOnly") } }
     @Published var ignoreMXF: Bool { didSet { store.set(ignoreMXF, forKey: "labrollIgnoreMXF") } }
@@ -69,6 +74,8 @@ final class LabrollStore: ObservableObject {
     init() {
         nextLabroll = store.string(forKey: "labrollNext") ?? "A001"
         camID = store.string(forKey: "labrollCamID") ?? ""
+        cameraReels = store.dictionary(forKey: "cameraReels") as? [String: Int] ?? [:]
+        cameraClips = store.dictionary(forKey: "cameraClips") as? [String: Int] ?? [:]
         destination = store.string(forKey: "labrollDestination") ?? ""
         renameOnly = store.bool(forKey: "labrollRenameOnly")
         ignoreMXF = store.object(forKey: "labrollIgnoreMXF") as? Bool ?? true
@@ -96,6 +103,27 @@ final class LabrollStore: ObservableObject {
     /// from it, unless it was changed meanwhile.
     func consume(_ labroll: String, suggested: String? = nil) {
         if nextLabroll.trimmingCharacters(in: .whitespaces) == (suggested ?? labroll) { nextLabroll = Labroll.next(labroll) }
+    }
+
+    /// Next reel of camera `letter`: E004.
+    func nextReel(for letter: String) -> String { letter + String(format: "%03d", cameraReels[letter] ?? 1) }
+
+    /// A card of camera `letter` got reel `number` (named after it, or carrying it): the next one follows.
+    func reelUsed(_ letter: String, _ number: Int) {
+        cameraReels[letter] = max(cameraReels[letter] ?? 1, number + 1)
+    }
+
+    /// Settings: a camera added by hand starts at reel 001.
+    func addCamera() {
+        let letter = newCameraLetter.uppercased().filter { ("A"..."Z").contains(String($0)) }.prefix(1)
+        newCameraLetter = ""
+        guard !letter.isEmpty, cameraReels[String(letter)] == nil else { return }
+        cameraReels[String(letter)] = 1
+    }
+
+    func removeCamera(_ letter: String) {
+        cameraReels[letter] = nil
+        cameraClips[letter] = nil
     }
 
     /// List the clips under `urls` as a new roll. Without `labroll`, the next one is reserved.
@@ -209,7 +237,7 @@ final class LabrollStore: ObservableObject {
             }
         }
         for roll in rolls where roll.labroll.trimmingCharacters(in: .whitespaces).isEmpty {
-            status = "Give every roll a labroll (\(roll.source) has none)."
+            status = "Give every roll a reel (\(roll.source) has none)."
             return
         }
 
@@ -342,7 +370,7 @@ struct LabrollView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Next labroll")
+                Text("Next reel")
                 TextField("A001", text: $store.nextLabroll).frame(width: 70)
                 Text("Cam ID")
                 TextField("optional", text: $store.camID).frame(width: 90)
@@ -354,7 +382,7 @@ struct LabrollView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     SchemeEditor(title: "Clip names", scheme: $store.clipScheme, standard: .clipDefault,
                                  forClips: true, values: store.exampleValues,
-                                 info: "Random characters are drawn once per clip. Card names follow their own scheme, in the Card Rename panel under Settings.")
+                                 info: "Random characters are drawn once per clip. Cards follow their own scheme: Card naming, in the Card Rename panel under Settings.")
                 }
                 .padding(.top, 6)
             }
@@ -427,7 +455,7 @@ struct RollView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
-                TextField("Labroll", text: $roll.labroll).frame(width: 70)
+                TextField("Reel", text: $roll.labroll).frame(width: 70)
                 TextField("Cam ID", text: $roll.camID).frame(width: 90)
                 Text(roll.source).bold()
                 Text("\(roll.clips.count) clips, \(ByteCountFormatter.string(fromByteCount: roll.size, countStyle: .file))")

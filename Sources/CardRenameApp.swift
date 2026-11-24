@@ -30,7 +30,7 @@ struct CardRenameApp: App {
 /// Opening the app again, or launching it for the first time, shows the same panel in a window.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
-    private let popover = NSPopover()
+    private let menuPanel = MenuPanel()
     private var window: NSWindow?
     private var watchers = Set<AnyCancellable>()
     private var visibilityWatch: NSKeyValueObservation?
@@ -47,24 +47,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.target = self
         statusItem.button?.toolTip = "Card Rename"
 
-        // The panel sets the popover's size from its natural height. With the default sizing, opening
-        // Settings centred the taller content in the still-small popover (top 173 pt out of view), then
-        // slid it back; the GeometryReader keeps the content at the popover's top-left at every step.
-        let popover = self.popover
-        let panel = NSHostingController(rootView: GeometryReader { _ in
+        // The panel follows the content's natural height. The GeometryReader keeps the content at the
+        // top-left while it grows (without it, opening Settings centred the taller content first), and
+        // the size is set after SwiftUI's layout pass, in whole points (fractions shifted it a pixel).
+        let menuPanel = self.menuPanel
+        menuPanel.contentView = MenuPanel.content(NSHostingView(rootView: GeometryReader { _ in
             PanelView(engine: engine)
                 .fixedSize(horizontal: false, vertical: true)
-                // Whole points: a fractional size (803.1) made the popover shift by a pixel or two.
                 .onGeometryChange(for: CGSize.self, of: { $0.size }) { size in
-                    // After the layout pass, never during it (see showWindow).
-                    DispatchQueue.main.async {
-                        popover.contentSize = NSSize(width: size.width.rounded(.up), height: size.height.rounded(.up))
-                    }
+                    DispatchQueue.main.async { menuPanel.fit(size) }
                 }
-        })
-        panel.sizingOptions = []
-        popover.contentViewController = panel
-        popover.behavior = .transient
+        }))
 
         engine.$enabled
             .sink { [weak self] on in
@@ -101,14 +94,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor @objc private func togglePopover() {
         guard let button = statusItem.button else { return }
-        if popover.isShown {
-            popover.performClose(nil)
+        if menuPanel.isVisible {
+            menuPanel.close()
         } else {
             NSApp.activate(ignoringOtherApps: true)
             // Right size from the first frame; the panel isn't laid out while closed.
             let size = NSHostingView(rootView: PanelView(engine: .shared)).fittingSize
-            popover.contentSize = NSSize(width: size.width.rounded(.up), height: size.height.rounded(.up))
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            menuPanel.show(below: button, size: size)
             Updater.shared.checkIfStale()
         }
     }
@@ -163,12 +155,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Clips of a card renamed LABROLL C### _YYYYMMDD _CAMID, copied or renamed in place.
     @MainActor func showLabrollWindow() {
-        popover.performClose(nil)
+        menuPanel.close()
         if labrollWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 560),
                                   styleMask: [.titled, .closable, .resizable, .miniaturizable],
                                   backing: .buffered, defer: false)
-            window.title = "Labroll"
+            window.title = "Clip Renamer"
             window.isReleasedWhenClosed = false
             // Never smaller than its content: opening the naming scheme grows the window.
             let content = NSHostingController(rootView: LabrollView(store: .shared))
@@ -226,6 +218,10 @@ struct PanelView: View {
                 HStack {
                     Label("Update available: \(update.version)", systemImage: "arrow.down.circle")
                     Spacer()
+                    if !update.notes.isEmpty {
+                        Button("What's new") { Changelog.show(version: update.version, notes: update.notes) }
+                            .buttonStyle(.link)
+                    }
                     if updater.canInstall {
                         Button(updater.installing ? "Installing…" : "Install and Relaunch") { updater.install() }
                             .disabled(updater.installing)
@@ -276,13 +272,13 @@ struct PanelView: View {
             HStack {
                 Button("Rename all cards now") { Task { await engine.renameNow() } }
                 Spacer()
-                Button("Labroll…") { LabrollStore.shared.openWindow?() }
+                Button("Clip renamer…") { LabrollStore.shared.openWindow?() }
                     .help("Rename the clips of a card A001C001_YYYYMMDD_CAMID, copied or in place")
             }
 
             Divider()
 
-            DisclosureGroup("Recent renames", isExpanded: $engine.recentOpen) {
+            DisclosureGroup(isExpanded: $engine.recentOpen) {
                 VStack(alignment: .leading, spacing: 10) {
                     if engine.recent.isEmpty {
                         Text("None yet").foregroundStyle(.secondary)
@@ -302,7 +298,7 @@ struct PanelView: View {
                             } else if engine.isMounted(entry) {
                                 Group {
                                     Button("Clips") { engine.sendToLabroll(entry) }
-                                        .help("List this card's clips in the Labroll window")
+                                        .help("List this card's clips in the Clip renamer")
                                     Button("Undo") { Task { await engine.undo(entry) } }
                                 }
                                 .controlSize(.small)
@@ -313,20 +309,32 @@ struct PanelView: View {
                     }
                 }
                 .padding(.top, 6)
+            } label: {
+                HStack {
+                    Text("Recent renames")
+                    Spacer()
+                    if !engine.recent.isEmpty {
+                        Button("Clear") { engine.clearRecent() }
+                            .controlSize(.small)
+                            .help("Remove every rename from this list (the log file keeps them)")
+                    }
+                }
             }
 
             Divider()
 
             DisclosureGroup("Settings", isExpanded: $engine.settingsOpen) {
                 VStack(alignment: .leading, spacing: 8) {
+                    CameraReelsSettings(store: .shared)
                     HStack(spacing: 4) {
-                        Text("Default card names").font(.caption).foregroundStyle(.secondary)
-                        InfoButton("Only cards still named one of these are renamed, comma separated. A number after the name counts too: UNTITLED 2, DJI1.")
+                        Text("Volume names triggering Card Rename").font(.caption).foregroundStyle(.secondary)
+                        InfoButton("Only volumes named one of these are offered for renaming, comma separated. A number after the name counts too: UNTITLED 2, DJI1…")
                     }
                     TextField("UNTITLED, NO NAME, DJI", text: $engine.defaultNames)
+                    CardSchemeSettings(store: .shared)
                     HStack(spacing: 4) {
                         Text("Cards without reel ID").font(.caption).foregroundStyle(.secondary)
-                        InfoButton("Both use the card naming scheme and the Labroll window's next labroll and Cam ID; the card's clips are listed there once it is ready.")
+                        InfoButton("Both use the card naming scheme: the reel is the next reel of the camera letter found in the clip names, else the Clip renamer's next reel, with its Cam ID. The card's clips are listed in the Clip renamer once it is ready.")
                     }
                     Picker("Cards without reel ID", selection: $engine.askWhenNoReel) {
                         Text("Name automatically").tag(false)
@@ -334,14 +342,17 @@ struct PanelView: View {
                     }
                     .pickerStyle(.radioGroup)
                     .labelsHidden()
-                    CardSchemeSettings(store: .shared)
+                    HStack(spacing: 4) {
+                        Toggle("Warn about gaps in reels and clips", isOn: $engine.warnGaps)
+                        InfoButton("For each camera letter, Card Rename remembers the last reel and clip number. A card whose reel skips one (A003 then A005), whose clips skip numbers, or whose clips don't follow the last card of that camera (CAM_E_0013 after CAM_E_0010) brings up a red warning.")
+                    }
                     HStack(spacing: 4) {
                         Toggle("Eject the card after renaming", isOn: $engine.ejectAfterRename)
                         InfoButton("After a rename, eject the card and insert it again before offloading. Until then, Finder and offload apps may keep the old name, and a second card mounted with the same \"Untitled\" name may not show up.")
                     }
                     HStack(spacing: 4) {
                         Toggle("Offer to rename clips without reel ID", isOn: $engine.offerClipRename)
-                        InfoButton("Cards without reel ID (GoPro, DJI, Sony C0001.MP4…): once the card is renamed, or inserted again after the eject, Card Rename asks whether to list its clips in the Labroll window and rename them A001C001… Off, use the Clips button of a recent rename.")
+                        InfoButton("Cards without reel ID (GoPro, DJI, Sony C0001.MP4…): once the card is renamed, or inserted again after the eject, Card Rename asks whether to list its clips in the Clip renamer and rename them A001C001… Off, use the Clips button of a recent rename.")
                     }
                     Toggle("Open at login", isOn: Binding(get: { engine.openAtLogin },
                                                           set: { engine.setOpenAtLogin($0) }))
@@ -373,11 +384,129 @@ struct CardSchemeSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            SchemeEditor(title: "Card names", scheme: $store.cardScheme, standard: .cardDefault,
+            SchemeEditor(title: "Card naming", scheme: $store.cardScheme, standard: .cardDefault,
                          forClips: false, values: store.exampleValues, compact: true,
-                         info: "Every card follows it. With a reel ID, Labroll is the reel (D902_261103); {labroll} alone keeps D902. Labels keep A-Z 0-9 _ - and spaces. When too long, YYYY becomes YY, then the date and the camera are left out; random characters stay.")
+                         info: "Every card name follows this scheme. Reel ID is the reel found in the clip names (D013C001_261030K8 gives D013). Without one, if a camera letter is detected it's the next reel of that camera letter found in the app settings (Next reel per camera), otherwise the Clip renamer's next reel. Each reel used moves its counter on. Names can contain A-Z 0-9 _ - and spaces. If the name is too long for the card's file format: YYYY becomes YY, then the date, Cam ID and original name are left out; Reel ID, random characters and camera letter stay.")
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
+    }
+}
+
+/// Next reel per camera letter, in the panel's Settings: listed, edited, added, removed.
+struct CameraReelsSettings: View {
+    @ObservedObject var store: LabrollStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Text("Next reel per camera").bold()
+                InfoButton("Cards without reel ID whose clips carry a camera letter (CAM_E_0013, A_CAM_0001…) take that camera's next reel instead of the Clip renamer's next reel, and the counter moves on. Cards with a reel ID (A005C001…) move their camera's counter on too. A camera is added the first time one of its cards is renamed, or by hand here.")
+            }
+            if store.cameraReels.isEmpty {
+                Text("None yet: added when a card with a camera letter is renamed.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(store.cameraReels.keys.sorted(), id: \.self) { letter in
+                HStack {
+                    Text("Camera \(letter)").frame(width: 70, alignment: .leading)
+                    TextField("1", value: Binding(get: { store.cameraReels[letter] ?? 1 },
+                                                  set: { store.cameraReels[letter] = max(1, $0) }),
+                              format: .number)
+                        .frame(width: 50)
+                    Text("next \(store.nextReel(for: letter))").foregroundStyle(.secondary)
+                    Spacer()
+                    Button { store.removeCamera(letter) } label: { Image(systemName: "minus.circle") }
+                        .buttonStyle(.borderless)
+                        .help("Remove camera \(letter) and its counters")
+                }
+            }
+            HStack {
+                TextField("Letter", text: $store.newCameraLetter)
+                    .frame(width: 70)
+                    .onSubmit { store.addCamera() }
+                Button("Add camera") { store.addCamera() }
+                    .disabled(store.newCameraLetter.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .controlSize(.small)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
+    }
+}
+
+/// The menu bar panel: like a menu, it opens at once under the icon with no arrow or animation, and
+/// closes on a click elsewhere or Escape. A panel rather than an NSMenu, for its text fields and switches.
+final class MenuPanel: NSPanel {
+    private var monitors: [Any] = []
+    private weak var button: NSStatusBarButton?
+
+    init() {
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 340, height: 300), styleMask: [.borderless],
+                   backing: .buffered, defer: false)
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
+        level = .floating
+        isReleasedWhenClosed = false
+        animationBehavior = .none
+        collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+    }
+
+    override var canBecomeKey: Bool { true }   // text fields in Settings
+
+    /// Menu background (blur, rounded corners) around the SwiftUI content.
+    static func content(_ view: NSView) -> NSView {
+        let background = NSVisualEffectView()
+        background.material = .menu
+        background.state = .active
+        background.wantsLayer = true
+        background.layer?.cornerRadius = 10
+        background.layer?.masksToBounds = true
+        view.frame = background.bounds
+        view.autoresizingMask = [.width, .height]
+        background.addSubview(view)
+        return background
+    }
+
+    func show(below button: NSStatusBarButton, size: CGSize) {
+        self.button = button
+        guard let buttonWindow = button.window else { return }
+        let anchor = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
+        let screen = buttonWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+        let width = size.width.rounded(.up), height = size.height.rounded(.up)
+        let x = min(max(anchor.minX, screen.minX + 6), screen.maxX - width - 6)
+        setFrame(NSRect(x: x, y: anchor.minY - 4 - height, width: width, height: height), display: true)
+        makeKeyAndOrderFront(nil)
+        button.highlight(true)
+        // Click in another app, or on the desktop: close, like a menu.
+        monitors.append(NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            self?.close()
+        } as Any)
+        // Escape, or a click in another window of this app (not the icon, which toggles).
+        monitors.append(NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { [weak self] event in
+            guard let self else { return event }
+            if event.type == .keyDown, event.keyCode == 53, event.window === self { self.close(); return nil }
+            if event.type == .leftMouseDown, let window = event.window, window !== self,
+               window !== self.button?.window, !(window is NSPanel && window.level.rawValue > NSWindow.Level.floating.rawValue),
+               window.className != "_NSPopoverWindow" {
+                self.close()
+            }
+            return event
+        } as Any)
+    }
+
+    /// Height follows the content; the top stays under the icon.
+    func fit(_ size: CGSize) {
+        let width = size.width.rounded(.up), height = size.height.rounded(.up)
+        guard isVisible, frame.size != NSSize(width: width, height: height) else { return }
+        setFrame(NSRect(x: frame.minX, y: frame.maxY - height, width: width, height: height), display: true)
+    }
+
+    override func close() {
+        monitors.forEach(NSEvent.removeMonitor)
+        monitors = []
+        button?.highlight(false)
+        super.close()
     }
 }
